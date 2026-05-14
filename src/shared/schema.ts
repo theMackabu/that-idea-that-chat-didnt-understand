@@ -62,5 +62,6 @@ export type ComposeUiRequest = {
 
 export type ToolOutputEvent =
   | { runId: string; type: "start"; command: string }
+  | { runId: string; type: "retry"; command: string; reason: string }
   | { runId: string; type: "chunk"; stream: "stdout" | "stderr"; text: string }
   | { runId: string; type: "exit"; code: number | null; signal: NodeJS.Signals | null };

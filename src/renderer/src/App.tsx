@@ -1570,6 +1570,13 @@ function inferDefaults(fields: GeneratedField[]): Record<string, FieldValue> {
 }
 
 function toTerminalEntry(event: ToolOutputEvent): TerminalEntry {
+  if (event.type === 'retry') {
+    return {
+      id: crypto.randomUUID(),
+      text: `\n${event.reason}\n$ ${event.command}\n`
+    };
+  }
+
   if (event.type === 'chunk') {
     return { id: crypto.randomUUID(), text: event.text, stream: event.stream };
   }

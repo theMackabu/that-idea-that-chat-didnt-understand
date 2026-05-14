@@ -1,11 +1,12 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { generateObject } from 'ai';
-import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, type WebContents } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { accessSync, constants, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { z } from 'zod';
 import { generatedUiSchema, type ComposeUiRequest, type GeneratedUi, type ToolRunRequest } from '../shared/schema';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -76,6 +77,7 @@ ipcMain.handle('ai:compose-ui', async (_event, request: ComposeUiRequest | strin
       schema: generatedUiSchema,
       system: [
         'You create schema-driven utility UIs for a local Electron app called Workbench.',
+        'The app runs on macOS. Use macOS commands such as open, pbcopy, and osascript where appropriate. Do not use Linux-only commands like xdg-open.',
         'Create a compact UI for any local command-line task the user asks for.',
         'Use tool shell.run for executable tasks. Use noop only when there is genuinely nothing local to run.',
         'For shell.run, include a command template in command. Use {{fieldName}} placeholders for user inputs.',
@@ -88,7 +90,8 @@ ipcMain.handle('ai:compose-ui', async (_event, request: ComposeUiRequest | strin
         'The user may be iterating on a previous generated tool. Use the provided conversation context, current UI values, command preview, and recent run output to resolve references like "that", "it", "the downloaded file", "same folder", or "the previous command".',
         'When the user asks to modify a previous artifact or result, preserve and prefill relevant paths, URLs, folders, formats, and options from context instead of asking for them again.',
         'Use sparse UI copy: titles should be 2 to 5 words, summaries should be one short sentence, field descriptions should be omitted unless truly helpful, and any description should be under 8 words.',
-        'Avoid explanatory box blocks for obvious workflows. Prefer concise controls over paragraphs.'
+        'Avoid explanatory box blocks for obvious workflows. Prefer concise controls over paragraphs.',
+        'Do not add safety text telling the user to ensure a CLI is installed or works. Workbench checks missing executables before running.'
       ].join(' '),
       prompt: buildComposePrompt(composeRequest)
     });
@@ -158,6 +161,8 @@ async function reviewGeneratedUi(
       'Do not use an output template, glob, CLI-specific placeholder, or generated filename pattern as if it were a concrete file path in a later command.',
       'If a command must use a later output file, add an explicit output file/path field and reference that field consistently.',
       'If the request depends on an external CLI, keep it as a shell.run command. The runtime will check whether the CLI exists.',
+      'The app runs on macOS. Replace Linux-only openers such as xdg-open with open.',
+      'Remove safety notes that only say to ensure a CLI is installed or available.',
       'If the command cannot be made reasonably correct or safe, return a noop UI explaining the missing information in one short sentence.'
     ].join(' '),
     prompt: [
@@ -187,34 +192,7 @@ ipcMain.handle('tool:run', async (event, request: ToolRunRequest) => {
   const sender = event.sender;
 
   sender.send('tool:output', { runId, type: 'start', command: commandConfig.command });
-
-  const child = spawn(commandConfig.file, commandConfig.args, {
-    cwd: commandConfig.cwd,
-    env: {
-      ...process.env,
-      PATH: expandGuiPath(process.env.PATH)
-    },
-    shell: commandConfig.shell
-  });
-
-  activeRuns.set(runId, child);
-
-  child.stdout.on('data', (chunk: Buffer) => {
-    sender.send('tool:output', { runId, type: 'chunk', stream: 'stdout', text: chunk.toString() });
-  });
-
-  child.stderr.on('data', (chunk: Buffer) => {
-    sender.send('tool:output', { runId, type: 'chunk', stream: 'stderr', text: chunk.toString() });
-  });
-
-  child.on('error', error => {
-    sender.send('tool:output', { runId, type: 'chunk', stream: 'stderr', text: `${error.message}\n` });
-  });
-
-  child.on('exit', (code, signal) => {
-    activeRuns.delete(runId);
-    sender.send('tool:output', { runId, type: 'exit', code, signal });
-  });
+  void runWithOneRepairAttempt(runId, sender, request, commandConfig);
 
   return { runId, command: commandConfig.command };
 });
@@ -225,6 +203,150 @@ ipcMain.handle('tool:cancel', async (_event, runId: string) => {
   child.kill('SIGTERM');
   return true;
 });
+
+async function runWithOneRepairAttempt(
+  runId: string,
+  sender: WebContents,
+  request: ToolRunRequest,
+  initialCommand: ReturnType<typeof buildCommand>
+) {
+  const first = await runCommandProcess(runId, sender, initialCommand);
+  if ((first.code ?? 0) === 0 || first.cancelled) {
+    sender.send('tool:output', { runId, type: 'exit', code: first.code, signal: first.signal });
+    return;
+  }
+
+  const revisedCommand = await reviseFailedCommand(request, initialCommand.command, first.output);
+  if (!revisedCommand || revisedCommand.trim() === initialCommand.command.trim()) {
+    sender.send('tool:output', {
+      runId,
+      type: 'chunk',
+      stream: 'stderr',
+      text: '\nWorkbench could not produce a safer revised command. Please review the error above.\n'
+    });
+    sender.send('tool:output', { runId, type: 'exit', code: first.code, signal: first.signal });
+    return;
+  }
+
+  let revisedConfig: ReturnType<typeof buildCommand>;
+  try {
+    revisedConfig = buildCommand({ ...request, tool: 'shell.run', command: revisedCommand });
+  } catch (error) {
+    sender.send('tool:output', {
+      runId,
+      type: 'chunk',
+      stream: 'stderr',
+      text: `\nWorkbench proposed a revised command, but it could not be run: ${(error as Error).message}\n`
+    });
+    sender.send('tool:output', { runId, type: 'exit', code: first.code, signal: first.signal });
+    return;
+  }
+
+  sender.send('tool:output', {
+    runId,
+    type: 'retry',
+    command: revisedConfig.command,
+    reason: 'The command failed, so Workbench revised it and is trying once more.'
+  });
+
+  const second = await runCommandProcess(runId, sender, revisedConfig);
+  if ((second.code ?? 0) !== 0 && !second.cancelled) {
+    sender.send('tool:output', {
+      runId,
+      type: 'chunk',
+      stream: 'stderr',
+      text: '\nThe revised command also failed. Please review Run details before trying again.\n'
+    });
+  }
+  sender.send('tool:output', { runId, type: 'exit', code: second.code, signal: second.signal });
+}
+
+function runCommandProcess(
+  runId: string,
+  sender: WebContents,
+  commandConfig: ReturnType<typeof buildCommand>
+): Promise<{ code: number | null; signal: NodeJS.Signals | null; output: string; cancelled: boolean }> {
+  return new Promise(resolve => {
+    const chunks: string[] = [];
+    const child = spawn(commandConfig.file, commandConfig.args, {
+      cwd: commandConfig.cwd,
+      env: {
+        ...process.env,
+        PATH: expandGuiPath(process.env.PATH)
+      },
+      shell: commandConfig.shell
+    });
+
+    activeRuns.set(runId, child);
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      const text = chunk.toString();
+      chunks.push(text);
+      sender.send('tool:output', { runId, type: 'chunk', stream: 'stdout', text });
+    });
+
+    child.stderr.on('data', (chunk: Buffer) => {
+      const text = chunk.toString();
+      chunks.push(text);
+      sender.send('tool:output', { runId, type: 'chunk', stream: 'stderr', text });
+    });
+
+    child.on('error', error => {
+      const text = `${error.message}\n`;
+      chunks.push(text);
+      sender.send('tool:output', { runId, type: 'chunk', stream: 'stderr', text });
+    });
+
+    child.on('exit', (code, signal) => {
+      activeRuns.delete(runId);
+      resolve({
+        code,
+        signal,
+        output: chunks.join('').slice(-8000),
+        cancelled: signal === 'SIGTERM'
+      });
+    });
+  });
+}
+
+async function reviseFailedCommand(request: ToolRunRequest, failedCommand: string, output: string): Promise<string | null> {
+  const localEnv = readLocalEnv();
+  const openaiApiKey = localEnv.OPENAI_API_KEY?.trim();
+  if (!openaiApiKey) return null;
+
+  try {
+    const openai = createOpenAI({ apiKey: openaiApiKey });
+    const modelName = localEnv.OPENAI_REVIEW_MODEL?.trim() || localEnv.OPENAI_MODEL?.trim() || 'gpt-4.1-mini';
+    const result = await generateObject({
+      model: openai(modelName),
+      schema: z.object({
+        command: z.string().nullable(),
+        reason: z.string()
+      }),
+      system: [
+        'You repair failed macOS shell commands for Workbench.',
+        'Return one corrected command string, or null if retrying would be unsafe.',
+        'Do not repeat a command that already failed unless the correction is meaningful.',
+        'Use macOS commands. For opening files use open, not xdg-open.',
+        'If output shows a downloaded or generated concrete path, use that concrete path rather than a template like %(title)s.',
+        'Do not redownload or redo expensive completed work if the failure happened after the output file was created; prefer the shortest follow-up command that completes the user intent.',
+        'Keep user-provided paths and URLs intact.'
+      ].join(' '),
+      prompt: [
+        'Original run request:',
+        JSON.stringify(request, null, 2),
+        'Failed command:',
+        failedCommand,
+        'Recent output:',
+        output
+      ].join('\n\n')
+    });
+
+    return result.object.command?.trim() || null;
+  } catch {
+    return null;
+  }
+}
 
 function createFallbackUi(userPrompt: string): GeneratedUi {
   return {
