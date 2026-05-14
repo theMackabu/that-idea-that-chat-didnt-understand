@@ -16,7 +16,7 @@ import {
   X
 } from 'lucide-react';
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useState } from 'react';
-import type { GeneratedField, GeneratedUi, ToolOutputEvent } from '../../shared/schema';
+import type { GeneratedBlock, GeneratedField, GeneratedUi, ToolOutputEvent } from '../../shared/schema';
 import { TerminalEntry, TerminalPane } from './components/TerminalPane';
 import { cn } from './lib/utils';
 
@@ -32,8 +32,10 @@ type ToolHistoryItem = {
   summary: string;
   request: string;
   ui: GeneratedUi;
-  values: Record<string, string | boolean | undefined>;
+  values: Record<string, FieldValue>;
 };
+
+type FieldValue = string | number | boolean | undefined;
 
 const suggestions = ['I want to download some videos', 'Make a small image resize tool', 'Create a batch file renamer', 'Pull audio from a video'];
 
@@ -66,7 +68,7 @@ export function App() {
   const [taskTitle, setTaskTitle] = useState('Untitled task');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [ui, setUi] = useState<GeneratedUi | null>(null);
-  const [values, setValues] = useState<Record<string, string | boolean | undefined>>({});
+  const [values, setValues] = useState<Record<string, FieldValue>>({});
   const [logs, setLogs] = useState<TerminalEntry[]>([]);
   const [running, setRunning] = useState(false);
   const [runId, setRunId] = useState<string | null>(null);
@@ -198,7 +200,7 @@ export function App() {
     setShowOutput(false);
   }
 
-  function updateValues(nextValues: Record<string, string | boolean | undefined>) {
+  function updateValues(nextValues: Record<string, FieldValue>) {
     setValues(nextValues);
     setToolHistory(current => current.map(item => (item.id === activeToolId ? { ...item, values: nextValues } : item)));
   }
@@ -671,10 +673,76 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+function GeneratedBlocks({ blocks }: { blocks: GeneratedBlock[] }) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      {blocks.map((block, index) => (
+        <GeneratedBlockRenderer key={`${block.type}-${index}`} block={block} />
+      ))}
+    </div>
+  );
+}
+
+function GeneratedBlockRenderer({ block }: { block: GeneratedBlock }) {
+  if (block.type === 'image') {
+    return (
+      <figure className="overflow-hidden rounded-xl bg-[#18191b] ring-1 ring-white/8 sm:col-span-2">
+        {block.url ? <img src={block.url} alt={block.alt ?? block.title ?? ''} className="max-h-80 w-full object-cover" /> : null}
+        {block.title || block.text ? (
+          <figcaption className="space-y-1 p-4">
+            {block.title ? <div className="text-sm font-medium text-neutral-100">{block.title}</div> : null}
+            {block.text ? <div className="text-sm leading-6 text-neutral-500">{block.text}</div> : null}
+          </figcaption>
+        ) : null}
+      </figure>
+    );
+  }
+
+  if (block.type === 'metric') {
+    return (
+      <div className="rounded-xl bg-[#18191b] p-4 ring-1 ring-white/8">
+        <div className="text-sm text-neutral-500">{block.label ?? block.title ?? 'Metric'}</div>
+        <div className="mt-2 text-3xl font-semibold tracking-tight text-neutral-100">{block.value ?? '--'}</div>
+        {block.text ? <div className="mt-2 text-sm leading-6 text-neutral-500">{block.text}</div> : null}
+      </div>
+    );
+  }
+
+  if (block.type === 'barChart') {
+    const data = block.data ?? [];
+    const maxValue = Math.max(1, ...data.map(item => item.value));
+
+    return (
+      <div className="rounded-xl bg-[#18191b] p-4 ring-1 ring-white/8 sm:col-span-2">
+        {block.title ? <div className="mb-4 text-sm font-medium text-neutral-100">{block.title}</div> : null}
+        <div className="space-y-3">
+          {data.map(item => (
+            <div key={item.label} className="grid grid-cols-[minmax(88px,0.32fr)_1fr_auto] items-center gap-3 text-sm">
+              <div className="truncate text-neutral-500">{item.label}</div>
+              <div className="h-2 overflow-hidden rounded-full bg-white/8">
+                <div className="h-full rounded-full bg-[#6aa4ff]" style={{ width: `${Math.max(4, (item.value / maxValue) * 100)}%` }} />
+              </div>
+              <div className="font-mono text-neutral-400">{item.value}</div>
+            </div>
+          ))}
+        </div>
+        {block.text ? <div className="mt-4 text-sm leading-6 text-neutral-500">{block.text}</div> : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl bg-[#18191b] p-4 ring-1 ring-white/8 sm:col-span-2">
+      {block.title ? <div className="text-sm font-medium text-neutral-100">{block.title}</div> : null}
+      {block.text ? <div className={cn('text-sm leading-6 text-neutral-500', block.title ? 'mt-2' : '')}>{block.text}</div> : null}
+    </div>
+  );
+}
+
 function ToolForm(props: {
   ui: GeneratedUi;
-  values: Record<string, string | boolean | undefined>;
-  setValues: (next: Record<string, string | boolean | undefined>) => void;
+  values: Record<string, FieldValue>;
+  setValues: (next: Record<string, FieldValue>) => void;
   commandPreview: string;
   running: boolean;
   logs: TerminalEntry[];
@@ -685,7 +753,7 @@ function ToolForm(props: {
 }) {
   const { ui, values, setValues, commandPreview, running, logs, showOutput, onToggleOutput, onRun, onCancel } = props;
 
-  function setValue(name: string, value: string | boolean) {
+  function setValue(name: string, value: string | number | boolean) {
     setValues({ ...values, [name]: value });
   }
 
@@ -702,6 +770,8 @@ function ToolForm(props: {
           <p className="mt-3 rounded-lg bg-amber-400/10 px-3 py-2 text-sm leading-6 text-amber-200 ring-1 ring-amber-300/20">{ui.aiNote}</p>
         ) : null}
       </div>
+
+      {ui.blocks && ui.blocks.length > 0 ? <GeneratedBlocks blocks={ui.blocks} /> : null}
 
       {ui.fields.length > 0 ? (
         <div className="space-y-4 rounded-xl bg-[#18191b] p-5 ring-1 ring-white/8">
