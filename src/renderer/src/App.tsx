@@ -5,6 +5,7 @@ import {
   Code2,
   Database,
   Eraser,
+  Trash2,
   FileArchive,
   FileText,
   FolderOpen,
@@ -464,6 +465,16 @@ export function App() {
       { id: `${item.id}-response`, role: 'assistant', content: `${item.title}: ${item.summary}` }
     ]);
     setPreviousTools([]);
+    setSidebarOpen(false);
+  }
+
+  function deleteTool(id: string) {
+    setToolHistory(current => current.filter(item => item.id !== id));
+    setPreviousTools(current => current.filter(item => item.id !== id));
+
+    if (id === activeToolId) {
+      startNewTask();
+    }
   }
 
   function renameDraftTitle(nextTitle: string) {
@@ -538,32 +549,48 @@ export function App() {
           )}
         </div>
 
-        {sidebarOpen ? <ToolSidebar items={toolHistory} activeId={activeToolId} onSelect={restoreTool} /> : null}
+        {sidebarOpen ? <ToolSidebar items={toolHistory} activeId={activeToolId} onSelect={restoreTool} onDelete={deleteTool} /> : null}
       </section>
     </main>
   );
 }
 
-function ToolSidebar(props: { items: ToolHistoryItem[]; activeId: string | null; onSelect: (item: ToolHistoryItem) => void }) {
-  const { items, activeId, onSelect } = props;
+function ToolSidebar(props: {
+  items: ToolHistoryItem[];
+  activeId: string | null;
+  onSelect: (item: ToolHistoryItem) => void;
+  onDelete: (id: string) => void;
+}) {
+  const { items, activeId, onSelect, onDelete } = props;
 
   return (
     <aside className="app-no-drag absolute inset-y-0 right-0 z-20 flex w-80 select-none flex-col border-l border-[var(--border)] bg-[var(--chrome-bg)] shadow-[-8px_0_18px_rgba(0,0,0,0.12)]">
       {items.length > 0 ? (
         <div className="stable-scrollbar min-h-0 flex-1 overflow-y-auto p-2">
           {items.map(item => (
-            <button
+            <div
               key={item.id}
-              type="button"
-              onClick={() => onSelect(item)}
               className={cn(
-                'w-full rounded-md px-3 py-2.5 text-left transition',
+                'group grid grid-cols-[1fr_auto] items-start gap-2 rounded-md transition',
                 item.id === activeId ? 'bg-[var(--active)]' : 'hover:bg-[var(--hover)]'
               )}
             >
-              <div className="truncate text-sm font-medium text-[var(--text-strong)]">{item.title}</div>
-              <div className="mt-1 line-clamp-2 text-sm leading-5 text-[var(--text-faint)]">{item.summary}</div>
-            </button>
+              <button type="button" onClick={() => onSelect(item)} className="min-w-0 px-3 py-2.5 text-left">
+                <div className="truncate text-sm font-medium text-[var(--text-strong)]">{item.title}</div>
+                <div className="mt-1 line-clamp-2 text-sm leading-5 text-[var(--text-faint)]">{item.summary}</div>
+              </button>
+              <button
+                type="button"
+                onClick={event => {
+                  event.stopPropagation();
+                  onDelete(item.id);
+                }}
+                className="mt-2 mr-2 flex size-7 items-center justify-center rounded-md text-[var(--text-faint)] opacity-0 transition hover:bg-[var(--hover)] hover:text-[var(--text-strong)] group-hover:opacity-100"
+                title="Delete"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
           ))}
         </div>
       ) : (
@@ -1243,6 +1270,7 @@ function ToolForm(props: {
 }) {
   const { ui, values, setValues, commandPreview, running, logs, showOutput, onToggleOutput, onRun, onCancel } = props;
   const progress = useMemo(() => parseTerminalProgress(logs), [logs]);
+  const terminalPreview = useMemo(() => getTerminalPreviewLines(logs), [logs]);
 
   function setValue(name: string, value: string | number | boolean) {
     setValues({ ...values, [name]: value });
@@ -1311,21 +1339,22 @@ function ToolForm(props: {
         </button>
       </div>
 
-      <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)]">
+      <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)]/80">
         <button
           type="button"
           onClick={onToggleOutput}
-          className="flex w-full select-none items-center justify-between gap-3 px-4 py-3 text-left text-sm font-medium text-[var(--text)] transition hover:bg-[var(--hover)]"
+          className="flex w-full select-none items-center justify-between gap-3 px-3 py-2 text-left text-sm text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
         >
           <span className="flex items-center gap-2">
-            <Terminal size={16} />
+            <Terminal size={14} />
             Run details
           </span>
           <span className="flex items-center gap-2 text-[var(--text-faint)]">
-            {showOutput ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            {showOutput ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           </span>
         </button>
         {progress ? <TerminalProgress progress={progress} /> : null}
+        {!showOutput && terminalPreview.length > 0 ? <TerminalPreview lines={terminalPreview} /> : null}
         {showOutput ? (
           <div className={cn('border-t border-[var(--border)] p-3', progress ? 'pt-3' : '')}>
             <TerminalPane entries={logs} />
@@ -1496,13 +1525,28 @@ function FieldRenderer(props: { field: GeneratedField; value: FieldValue; onChan
 
 function TerminalProgress({ progress }: { progress: ParsedProgress }) {
   return (
-    <div className="border-t border-[var(--border)] px-4 py-3">
+    <div className="border-t border-[var(--border)] px-3 py-2.5">
       <div className="mb-2 flex items-center justify-between gap-3 text-sm">
         <span className="truncate text-[var(--text-muted)]">{progress.label}</span>
         <span className="font-mono text-[var(--text-faint)]">{Math.round(progress.percent)}%</span>
       </div>
       <div className="h-1.5 overflow-hidden rounded-full bg-[var(--surface-subtle)]">
         <div className="h-full rounded-full bg-[var(--accent)] transition-[width] duration-200" style={{ width: `${progress.percent}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function TerminalPreview({ lines }: { lines: string[] }) {
+  return (
+    <div className="relative border-t border-[var(--border)] px-3 py-2">
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-[var(--surface)] to-transparent" />
+      <div className="max-h-16 overflow-hidden font-mono text-[12px] leading-5 text-[var(--text-faint)]">
+        {lines.map((line, index) => (
+          <div key={`${index}-${line}`} className={cn('truncate', index === lines.length - 1 ? 'text-[var(--text-muted)]' : 'opacity-55')}>
+            {line}
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -1558,6 +1602,19 @@ function parseTerminalProgress(entries: TerminalEntry[]): ParsedProgress | null 
   const label = progressLine.length > 72 ? `${progressLine.slice(0, 69)}...` : progressLine;
 
   return { percent, label };
+}
+
+function getTerminalPreviewLines(entries: TerminalEntry[]) {
+  return stripAnsi(
+    entries
+      .slice(-20)
+      .map(entry => entry.text.replace(/\r/g, '\n'))
+      .join('')
+  )
+    .split(/\n/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .slice(-3);
 }
 
 function stripAnsi(value: string) {
