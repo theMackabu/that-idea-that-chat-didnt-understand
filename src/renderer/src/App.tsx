@@ -47,6 +47,18 @@ type ToolHistoryItem = {
   values: Record<string, FieldValue>;
 };
 
+type ToolSnapshot = {
+  id: string;
+  ui: GeneratedUi;
+  values: Record<string, FieldValue>;
+  commandPreview: string;
+};
+
+type ParsedProgress = {
+  percent: number;
+  label: string;
+};
+
 type FieldValue = string | number | boolean | undefined;
 
 type ToolExample = {
@@ -266,6 +278,7 @@ export function App() {
   const [toolHistory, setToolHistory] = useState<ToolHistoryItem[]>(readStoredToolHistory);
   const [activeToolId, setActiveToolId] = useState<string | null>(null);
   const [taskTitleEdited, setTaskTitleEdited] = useState(false);
+  const [previousTools, setPreviousTools] = useState<ToolSnapshot[]>([]);
 
   useEffect(() => {
     return window.uiterm.onToolOutput(event => {
@@ -321,6 +334,22 @@ export function App() {
         .filter(Boolean)
         .slice(-20)
     };
+    if (ui) {
+      const snapshotId = activeToolId ?? crypto.randomUUID();
+      setPreviousTools(current =>
+        current.some(tool => tool.id === snapshotId)
+          ? current
+          : [
+              ...current,
+              {
+                id: snapshotId,
+                ui,
+                values: { ...values },
+                commandPreview
+              }
+            ]
+      );
+    }
     setComposing(true);
     setPrompt('');
     setUi(null);
@@ -403,6 +432,7 @@ export function App() {
     setTaskTitleEdited(false);
     setMessages([]);
     setUi(null);
+    setPreviousTools([]);
     setValues({});
     setActiveToolId(null);
     setLogs([]);
@@ -433,6 +463,7 @@ export function App() {
       { id: `${item.id}-request`, role: 'user', content: item.request },
       { id: `${item.id}-response`, role: 'assistant', content: `${item.title}: ${item.summary}` }
     ]);
+    setPreviousTools([]);
   }
 
   function renameDraftTitle(nextTitle: string) {
@@ -475,6 +506,7 @@ export function App() {
               {ui ? (
                 <div className="space-y-7">
                   <TaskTranscript messages={messages} />
+                  <PreviousToolStack tools={previousTools} />
                   <ToolForm
                     ui={ui}
                     values={values}
@@ -489,7 +521,10 @@ export function App() {
                   />
                 </div>
               ) : composing ? (
-                <GeneratingUi messages={[...messages, { id: 'pending', role: 'user', content: prompt || 'Generating interface...' }]} />
+                <GeneratingUi
+                  messages={[...messages, { id: 'pending', role: 'user', content: prompt || 'Generating interface...' }]}
+                  previousTools={previousTools}
+                />
               ) : (
                 <InitialTaskDraft title={taskTitle} setTitle={renameDraftTitle} prompt={prompt} setPrompt={setPrompt} onSubmit={compose} />
               )}
@@ -556,10 +591,53 @@ function TaskTranscript({ messages }: { messages: ChatMessage[] }) {
   );
 }
 
-function GeneratingUi({ messages }: { messages: ChatMessage[] }) {
+function PreviousToolStack({ tools }: { tools: ToolSnapshot[] }) {
+  if (tools.length === 0) return null;
+
+  return (
+    <div className="space-y-5">
+      {tools.map(tool => (
+        <PreviousToolSnapshot key={tool.id} tool={tool} />
+      ))}
+    </div>
+  );
+}
+
+function PreviousToolSnapshot({ tool }: { tool: ToolSnapshot }) {
+  return (
+    <div className="pointer-events-none select-none space-y-4 border-y border-[var(--border)] py-5 opacity-45">
+      <div>
+        <div className="flex items-center gap-2 text-sm font-medium text-[var(--text-muted)]">
+          <WandSparkles size={15} />
+          Previous interface
+        </div>
+        <h2 className="mt-2 text-xl font-semibold tracking-tight text-[var(--text-strong)]">{tool.ui.title}</h2>
+        <p className="mt-2 max-w-[68ch] text-sm leading-6 text-pretty text-[var(--text-muted)]">{tool.ui.summary}</p>
+      </div>
+
+      {tool.ui.blocks && tool.ui.blocks.length > 0 ? <GeneratedBlocks blocks={tool.ui.blocks} /> : null}
+
+      {tool.ui.fields.length > 0 ? (
+        <div className="space-y-4 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-5">
+          {tool.ui.fields.map(field => (
+            <FieldRenderer key={field.name} field={field} value={tool.values[field.name]} onChange={() => undefined} />
+          ))}
+        </div>
+      ) : null}
+
+      <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] p-3">
+        <div className="mb-2 text-sm font-medium text-[var(--text-muted)]">Command preview</div>
+        <code className="block break-words font-mono text-sm leading-6 text-[var(--text)]">{tool.commandPreview}</code>
+      </div>
+    </div>
+  );
+}
+
+function GeneratingUi({ messages, previousTools }: { messages: ChatMessage[]; previousTools: ToolSnapshot[] }) {
   return (
     <div className="space-y-7">
       <TaskTranscript messages={messages.filter(message => message.id !== 'pending' || message.content !== 'Generating interface...')} />
+      <PreviousToolStack tools={previousTools} />
 
       <div className="space-y-6">
         <div className="flex select-none items-center gap-2 text-sm font-medium text-[var(--text-muted)]">
@@ -1164,6 +1242,7 @@ function ToolForm(props: {
   onCancel: () => void;
 }) {
   const { ui, values, setValues, commandPreview, running, logs, showOutput, onToggleOutput, onRun, onCancel } = props;
+  const progress = useMemo(() => parseTerminalProgress(logs), [logs]);
 
   function setValue(name: string, value: string | number | boolean) {
     setValues({ ...values, [name]: value });
@@ -1243,12 +1322,12 @@ function ToolForm(props: {
             Run details
           </span>
           <span className="flex items-center gap-2 text-[var(--text-faint)]">
-            {logs.length} events
             {showOutput ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
           </span>
         </button>
+        {progress ? <TerminalProgress progress={progress} /> : null}
         {showOutput ? (
-          <div className="border-t border-[var(--border)] p-3">
+          <div className={cn('border-t border-[var(--border)] p-3', progress ? 'pt-3' : '')}>
             <TerminalPane entries={logs} />
           </div>
         ) : null}
@@ -1415,6 +1494,20 @@ function FieldRenderer(props: { field: GeneratedField; value: FieldValue; onChan
   );
 }
 
+function TerminalProgress({ progress }: { progress: ParsedProgress }) {
+  return (
+    <div className="border-t border-[var(--border)] px-4 py-3">
+      <div className="mb-2 flex items-center justify-between gap-3 text-sm">
+        <span className="truncate text-[var(--text-muted)]">{progress.label}</span>
+        <span className="font-mono text-[var(--text-faint)]">{Math.round(progress.percent)}%</span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-[var(--surface-subtle)]">
+        <div className="h-full rounded-full bg-[var(--accent)] transition-[width] duration-200" style={{ width: `${progress.percent}%` }} />
+      </div>
+    </div>
+  );
+}
+
 function inferDefaults(fields: GeneratedField[]): Record<string, FieldValue> {
   return Object.fromEntries(
     fields.map(field => [
@@ -1442,6 +1535,33 @@ function toTerminalEntry(event: ToolOutputEvent): TerminalEntry {
   }
 
   return { id: crypto.randomUUID(), text: '' };
+}
+
+function parseTerminalProgress(entries: TerminalEntry[]): ParsedProgress | null {
+  const text = entries
+    .slice(-80)
+    .map(entry => entry.text)
+    .join('');
+  const cleaned = stripAnsi(text).replace(/\r/g, '\n');
+  const matches = [...cleaned.matchAll(/(?:^|[^\d])(\d{1,3}(?:\.\d+)?)\s?%/g)];
+  const latest = matches.at(-1);
+  if (!latest) return null;
+
+  const percent = Math.max(0, Math.min(100, Number(latest[1])));
+  if (!Number.isFinite(percent)) return null;
+
+  const lines = cleaned
+    .split(/\n/)
+    .map(line => line.trim())
+    .filter(Boolean);
+  const progressLine = [...lines].reverse().find(line => line.includes(latest[0].trim())) ?? 'Progress';
+  const label = progressLine.length > 72 ? `${progressLine.slice(0, 69)}...` : progressLine;
+
+  return { percent, label };
+}
+
+function stripAnsi(value: string) {
+  return value.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '');
 }
 
 function quotePreview(value: string) {

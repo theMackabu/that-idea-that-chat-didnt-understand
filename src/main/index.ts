@@ -85,7 +85,9 @@ ipcMain.handle('ai:compose-ui', async (_event, request: ComposeUiRequest | strin
         'Use shell.run for executable tasks, including video downloads, ssh, git, ffmpeg, python, npm, docker, rsync, find, grep, tar, zip, database CLIs, network diagnostics, and system tools.',
         'When useful, generate multiple fields so the user can safely adjust hostnames, folders, flags, formats, services, ports, and filters before running.',
         'The user may be iterating on a previous generated tool. Use the provided conversation context, current UI values, command preview, and recent run output to resolve references like "that", "it", "the downloaded file", "same folder", or "the previous command".',
-        'When the user asks to modify a previous artifact or result, preserve and prefill relevant paths, URLs, folders, formats, and options from context instead of asking for them again.'
+        'When the user asks to modify a previous artifact or result, preserve and prefill relevant paths, URLs, folders, formats, and options from context instead of asking for them again.',
+        'Use sparse UI copy: titles should be 2 to 5 words, summaries should be one short sentence, field descriptions should be omitted unless truly helpful, and any description should be under 8 words.',
+        'Avoid explanatory box blocks for obvious workflows. Prefer concise controls over paragraphs.'
       ].join(' '),
       prompt: buildComposePrompt(composeRequest)
     });
