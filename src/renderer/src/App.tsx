@@ -260,6 +260,12 @@ const toolExamples: ToolExample[] = [
     category: 'Documents'
   },
   {
+    title: 'PDF maker',
+    description: 'Create a PDF from markdown, HTML, text, or images.',
+    prompt: 'Create a PDF maker with source file picker, source type select, explicit output PDF file, page size select, margins, and open after create toggle',
+    category: 'Documents'
+  },
+  {
     title: 'OCR runner',
     description: 'Run OCR on images or PDFs using local tools.',
     prompt: 'Run OCR on a folder of images with language select, output folder, PDF toggle, and confidence report metric',

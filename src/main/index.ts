@@ -95,6 +95,10 @@ ipcMain.handle('ai:compose-ui', async (_event, request: ComposeUiRequest | strin
         'The app shell-quotes placeholder values before execution, so do not wrap placeholders in quotes.',
         'Use shell.run for executable tasks, including video downloads, ssh, git, ffmpeg, python, npm, docker, rsync, find, grep, tar, zip, database CLIs, network diagnostics, and system tools.',
         'When useful, generate multiple fields so the user can safely adjust hostnames, folders, flags, formats, services, ports, and filters before running.',
+        'For PDF creation or conversion tasks, build around explicit source and output file fields. Include an output PDF file field instead of guessing output.pdf.',
+        'For PDF tasks, prefer installed purpose-built tools when available, such as pandoc for Markdown/HTML to PDF, qpdf or pdftk for splitting/merging, ImageMagick magick for images to PDF, and tesseract/ocrmypdf for OCR workflows. If a needed tool is missing, the reviewer will replace it with an installed equivalent or produce a concise noop.',
+        'For simple text-to-PDF tasks on macOS, prefer generating a temporary HTML file and printing it to PDF with an available renderer/tool rather than inventing PDF bytes by hand.',
+        'PDF commands should print the final output path on success, and optionally open the PDF with macOS open when the UI has an Open after create checkbox.',
         'The user may be iterating on a previous generated tool. Use the provided conversation context, current UI values, command preview, and recent run output to resolve references like "that", "it", "the downloaded file", "same folder", or "the previous command".',
         'When the user asks to modify a previous artifact or result, preserve and prefill relevant paths, URLs, folders, formats, and options from context instead of asking for them again.',
         'For follow-up requests like "convert that downloaded file", use the concrete producedFiles path from context as the file field defaultValue and command input. Do not re-run the previous download or generation step.',
@@ -190,6 +194,9 @@ async function reviewGeneratedUi(
       'Every field that affects execution should be represented in the command.',
       'Do not invent hardcoded local paths unless supplied by the user context.',
       'Use file fields for individual input/output paths and folder fields for directories; prefer picker-backed fields over plain text path inputs.',
+      'For PDF creation/conversion UIs, require an explicit output PDF file field and make the command print that path after success.',
+      'For PDF workflows, do not hardcode output.pdf or write binary PDF syntax manually in shell. Use an installed PDF-capable tool or a clear noop if no suitable tool is available.',
+      'When the user asks to open/view the created PDF, use macOS open on the explicit output PDF path after creation.',
       'When context contains producedFiles and the latest request refers to that prior output, the UI must use a file field defaultValue set to the matching producedFiles path and the command must operate on that field.',
       'For follow-up transforms, do not include the old download/generation command again unless the user explicitly asked to redo it.',
       'For requests to play, open, or watch an existing produced file, use macOS open against that file. Do not redownload or transform it.',
@@ -554,7 +561,7 @@ function buildCommand(request: ToolRunRequest): {
     if (!command) throw new Error('No command was generated.');
     assertSupportedTemplateSyntax(command);
     const argv = splitCommandLine(command);
-    const executable = extractExecutableTokens(command)[0] ?? findExecutableToCheck(argv);
+    const executable = !needsShell(command) ? findExecutableToCheck(argv) : null;
     if (executable) ensureExecutableAvailable(executable);
 
     if (argv.length > 0 && !needsShell(command)) {
