@@ -11,8 +11,8 @@ import { generatedUiSchema, type ComposeUiRequest, type GeneratedUi, type ToolRu
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const activeRuns = new Map<string, ChildProcessWithoutNullStreams>();
-const defaultUiModel = 'gpt-5-mini';
-const defaultReviewModel = 'gpt-5-mini';
+const defaultUiModel = 'gpt-5.2';
+const defaultReviewModel = 'gpt-5.4-mini';
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -213,10 +213,7 @@ async function reviewGeneratedUi(
 function inspectGeneratedUiToolAvailability(ui: GeneratedUi) {
   const values = Object.fromEntries(ui.fields.map(field => [field.name, field.defaultValue ?? '']));
   const command = renderCommandTemplate(ui.command || ui.previewCommand || '', values).trim();
-  const executableReferences = new Set<string>([
-    ...extractExecutableTokens(command),
-    ...extractMissingExecutableReferences(JSON.stringify(ui))
-  ]);
+  const executableReferences = new Set<string>([...extractExecutableTokens(command), ...extractMissingExecutableReferences(JSON.stringify(ui))]);
 
   return [...executableReferences].map(executable => ({
     executable,
@@ -280,12 +277,7 @@ ipcMain.handle('tool:cancel', async (_event, runId: string) => {
   return true;
 });
 
-async function runWithOneRepairAttempt(
-  runId: string,
-  sender: WebContents,
-  request: ToolRunRequest,
-  initialCommand: ReturnType<typeof buildCommand>
-) {
+async function runWithOneRepairAttempt(runId: string, sender: WebContents, request: ToolRunRequest, initialCommand: ReturnType<typeof buildCommand>) {
   const first = await runCommandProcess(runId, sender, initialCommand);
   if ((first.code ?? 0) === 0 || first.cancelled) {
     sender.send('tool:output', { runId, type: 'exit', code: first.code, signal: first.signal });
@@ -293,9 +285,7 @@ async function runWithOneRepairAttempt(
   }
 
   const revisedCommand = await reviseFailedCommand(request, initialCommand.command, first.output);
-  const reconciledCommand = revisedCommand
-    ? reconcileCommandWithProducedFiles(revisedCommand, first.output, initialCommand.cwd)
-    : null;
+  const reconciledCommand = revisedCommand ? reconcileCommandWithProducedFiles(revisedCommand, first.output, initialCommand.cwd) : null;
   if (!reconciledCommand || reconciledCommand.trim() === initialCommand.command.trim()) {
     sender.send('tool:output', {
       runId,
@@ -412,14 +402,7 @@ async function reviseFailedCommand(request: ToolRunRequest, failedCommand: strin
         'Do not redownload or redo expensive completed work if the failure happened after the output file was created; prefer the shortest follow-up command that completes the user intent.',
         'Keep user-provided paths and URLs intact.'
       ].join(' '),
-      prompt: [
-        'Original run request:',
-        JSON.stringify(request, null, 2),
-        'Failed command:',
-        failedCommand,
-        'Recent output:',
-        output
-      ].join('\n\n')
+      prompt: ['Original run request:', JSON.stringify(request, null, 2), 'Failed command:', failedCommand, 'Recent output:', output].join('\n\n')
     });
 
     return result.object.command?.trim() || null;
