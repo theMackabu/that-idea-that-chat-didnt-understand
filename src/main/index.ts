@@ -102,6 +102,7 @@ ipcMain.handle('ai:compose-ui', async (_event, request: ComposeUiRequest | strin
         'For download-and-open workflows, run the downloader once. Use a temp archive/output path from the same run to learn the final file, then open that file. Do not invoke yt-dlp a second time just to print the path.',
         'Never put ~/ inside quotes in commands. Use $HOME/Downloads or an absolute folder path field instead.',
         'Avoid set -o pipefail for read-only discovery pipelines that use head, tail, grep -q, or early-exit consumers; SIGPIPE can be a harmless successful result.',
+        'On macOS, stat -f single-quoted format strings do not turn \\t into a tab. Use $\'%z\\t%N\' for a real tab, or avoid tab parsing by printing space-delimited size then rebuilding the path from remaining fields.',
         'Use sparse UI copy: titles should be 2 to 5 words, summaries should be one short sentence, field descriptions should be omitted unless truly helpful, and any description should be under 8 words.',
         'Avoid explanatory box blocks for obvious workflows. Prefer concise controls over paragraphs.',
         'Do not add safety text telling the user to ensure a CLI is installed or works. Workbench checks missing executables before running.'
@@ -195,6 +196,7 @@ async function reviewGeneratedUi(
       'For download-and-open workflows, do not call the downloader twice. Capture the final downloaded filepath during the same run, then open that path.',
       'Do not quote tilde paths like "~/Downloads"; quoted tilde does not expand. Use $HOME/Downloads or an absolute folder path.',
       'Avoid set -o pipefail for discovery pipelines that intentionally stop early with head, tail, grep -q, or similar consumers.',
+      'On macOS, rewrite stat -f \'%z\\t%N\' to stat -f $\'%z\\t%N\' when later parsing with awk -F\'\\t\'. Otherwise filenames will be blank.',
       'Do not use an output template, glob, CLI-specific placeholder, or generated filename pattern as if it were a concrete file path in a later command.',
       'Reject guessed filenames such as video.mp4, output.mp4, result.txt, and %(title)s whenever the real produced filename can differ.',
       'If a command must use a later output file, add an explicit output file/path field and reference that field consistently.',
@@ -571,7 +573,11 @@ function shellQuote(value: string): string {
 }
 
 function normalizeRenderedCommand(command: string): string {
-  return command.replaceAll('"~/', '"$HOME/').replaceAll("'~/", "'$HOME/");
+  return command
+    .replaceAll('"~/', '"$HOME/')
+    .replaceAll("'~/", "'$HOME/")
+    .replaceAll("stat -f '%z\\t%N'", "stat -f $'%z\\t%N'")
+    .replaceAll('stat -f "%z\\t%N"', "stat -f $'%z\\t%N'");
 }
 
 function assertSupportedTemplateSyntax(command: string) {
@@ -585,7 +591,7 @@ function findExecutableToCheck(argv: string[]): string | null {
 }
 
 function extractExecutableTokens(command: string): string[] {
-  const tokens = splitCommandLine(command.replace(/\r?\n/g, ' ; '));
+  const tokens = splitCommandLine(stripShellExpansionsForExecutableScan(command).replace(/\r?\n/g, ' ; '));
   const executables: string[] = [];
   let segment: string[] = [];
 
@@ -605,6 +611,13 @@ function extractExecutableTokens(command: string): string[] {
 
   flushSegment();
   return [...new Set(executables)];
+}
+
+function stripShellExpansionsForExecutableScan(command: string): string {
+  return command
+    .replace(/\$\(\([\s\S]*?\)\)/g, ' ')
+    .replace(/\$\([^()]*\)/g, ' ')
+    .replace(/\$\{[^}]*\}/g, ' ');
 }
 
 function findExecutableInTokens(argv: string[]): string | null {
