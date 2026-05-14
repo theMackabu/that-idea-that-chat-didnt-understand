@@ -61,6 +61,12 @@ type ParsedProgress = {
   label: string;
 };
 
+type RunResult = {
+  primary: string;
+  detail: string | null;
+  lines: string[];
+};
+
 type FieldValue = string | number | boolean | undefined;
 
 type ToolExample = {
@@ -1280,6 +1286,7 @@ function ToolForm(props: {
   const { ui, values, setValues, commandPreview, running, logs, showOutput, onToggleOutput, onRun, onCancel } = props;
   const progress = useMemo(() => (running ? parseTerminalProgress(logs) : null), [logs, running]);
   const terminalPreview = useMemo(() => getTerminalPreviewLines(logs), [logs]);
+  const runResult = useMemo(() => getRunResult(logs), [logs]);
 
   function setValue(name: string, value: string | number | boolean) {
     setValues({ ...values, [name]: value });
@@ -1302,6 +1309,8 @@ function ToolForm(props: {
       </div>
 
       {ui.blocks && ui.blocks.length > 0 ? <GeneratedBlocks blocks={ui.blocks} /> : null}
+
+      {runResult ? <LatestRunResult result={runResult} /> : null}
 
       {ui.fields.length > 0 ? (
         <div className="space-y-4 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[var(--shadow-soft)]">
@@ -1381,6 +1390,25 @@ function ToolForm(props: {
           </div>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+function LatestRunResult({ result }: { result: RunResult }) {
+  return (
+    <div className="rounded-lg border border-[var(--border-strong)] bg-[var(--surface)] p-4 shadow-[var(--shadow-soft)]">
+      <div className="mb-2 select-none text-sm font-medium text-[var(--text-muted)]">Latest result</div>
+      <div className="break-words font-mono text-sm leading-6 text-[var(--text-strong)]">{result.primary}</div>
+      {result.detail ? <div className="mt-1 font-mono text-sm leading-6 text-[var(--text-muted)]">{result.detail}</div> : null}
+      {result.lines.length > 2 ? (
+        <div className="mt-3 space-y-1 border-t border-[var(--border)] pt-3 font-mono text-xs leading-5 text-[var(--text-faint)]">
+          {result.lines.slice(2).map((line, index) => (
+            <div key={`${index}-${line}`} className="break-words">
+              {line}
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1653,6 +1681,29 @@ function getTerminalPreviewLines(entries: TerminalEntry[]) {
     .map(line => line.trim())
     .filter(Boolean)
     .slice(-3);
+}
+
+function getRunResult(entries: TerminalEntry[]): RunResult | null {
+  const lines = stripAnsi(
+    entries
+      .filter(entry => entry.stream === 'stdout')
+      .map(entry => entry.text.replace(/\r/g, '\n'))
+      .join('')
+  )
+    .split(/\n/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .filter(line => !/^\[download\]\s+\d+(?:\.\d+)?%/.test(line))
+    .filter(line => !/^process (completed|exited)/i.test(line))
+    .slice(-8);
+
+  if (lines.length === 0) return null;
+
+  return {
+    primary: lines[0],
+    detail: lines[1] ?? null,
+    lines
+  };
 }
 
 function getRecentLogLines(entries: TerminalEntry[], maxLines: number) {

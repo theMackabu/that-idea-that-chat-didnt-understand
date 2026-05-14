@@ -83,6 +83,8 @@ ipcMain.handle('ai:compose-ui', async (_event, request: ComposeUiRequest | strin
         'Create a compact UI for any local command-line task the user asks for.',
         'Use tool shell.run for executable tasks. Use noop only when there is genuinely nothing local to run.',
         'For shell.run, include a command template in command. Use {{fieldName}} placeholders for user inputs.',
+        'Only simple placeholders are supported. Do not use Handlebars, Mustache sections, conditionals, loops, helpers, {{#if}}, {{/if}}, or similar template syntax.',
+        'For optional flags, write shell conditionals using quoted placeholder values, e.g. if [ {{includeHidden}} = true ]; then ...; fi.',
         'Generate multi-step shell commands with newlines. Do not flatten shell scripts into one long line.',
         'Keep fields practical and typed. Use text, textarea, select, checkbox, file, folder, number, slider, and color fields that map to command arguments.',
         'Use file fields for source files, config files, archives, media files, PDFs, logs, and explicit output files. Use folder fields only for directories.',
@@ -182,6 +184,7 @@ async function reviewGeneratedUi(
       'Return the corrected UI object only.',
       'Preserve the user intent and concise UI style, but fix command mistakes before the UI reaches the user.',
       'Every {{placeholder}} in command or previewCommand must correspond to a field name.',
+      'Only simple placeholders like {{folder}} are supported. Remove or rewrite unsupported template syntax such as {{#if}}, {{/if}}, {{else}}, sections, loops, or helpers into shell conditionals.',
       'Every field that affects execution should be represented in the command.',
       'Do not invent hardcoded local paths unless supplied by the user context.',
       'Use file fields for individual input/output paths and folder fields for directories; prefer picker-backed fields over plain text path inputs.',
@@ -535,6 +538,7 @@ function buildCommand(request: ToolRunRequest): {
   if (request.tool === 'shell.run') {
     const command = normalizeRenderedCommand(renderCommandTemplate(request.command || '', request.values).trim());
     if (!command) throw new Error('No command was generated.');
+    assertSupportedTemplateSyntax(command);
     const argv = splitCommandLine(command);
     const executable = extractExecutableTokens(command)[0] ?? findExecutableToCheck(argv);
     if (executable) ensureExecutableAvailable(executable);
@@ -570,6 +574,12 @@ function normalizeRenderedCommand(command: string): string {
   return command.replaceAll('"~/', '"$HOME/').replaceAll("'~/", "'$HOME/");
 }
 
+function assertSupportedTemplateSyntax(command: string) {
+  const unsupportedTemplate = command.match(/\{\{\s*[#/^!>{&]/);
+  if (!unsupportedTemplate) return;
+  throw new Error('The generated command used unsupported template syntax. Ask Workbench to regenerate it with plain shell conditionals.');
+}
+
 function findExecutableToCheck(argv: string[]): string | null {
   return findExecutableInTokens(argv);
 }
@@ -600,17 +610,31 @@ function extractExecutableTokens(command: string): string[] {
 function findExecutableInTokens(argv: string[]): string | null {
   let skipNext = false;
   let skipUntilControlToken = false;
+  let skipTestExpression = false;
 
   for (const token of argv) {
     if (shellControlTokens.has(token)) {
       skipUntilControlToken = false;
+      skipTestExpression = false;
       continue;
     }
 
     if (skipUntilControlToken) continue;
 
+    if (skipTestExpression) {
+      if (token === ']' || token === ']]' || token === 'then' || token === 'do') {
+        skipTestExpression = false;
+      }
+      continue;
+    }
+
     if (skipNext) {
       skipNext = false;
+      continue;
+    }
+
+    if (token === '[' || token === '[[' || shellCompoundKeywords.has(token)) {
+      skipTestExpression = true;
       continue;
     }
 
@@ -723,6 +747,7 @@ function isExecutable(path: string) {
 const shellControlTokens = new Set(['&&', '||', '|', ';', '&', '(', ')']);
 const pathArgumentBuiltins = new Set(['.', 'cd', 'source']);
 const shellOptionBuiltins = new Set(['set', 'unset', 'ulimit', 'umask']);
+const shellCompoundKeywords = new Set(['if', 'then', 'else', 'elif', 'fi', 'while', 'until', 'do', 'done', 'case', 'esac', 'for', 'in']);
 const shellBuiltins = new Set([
   '.',
   'alias',
