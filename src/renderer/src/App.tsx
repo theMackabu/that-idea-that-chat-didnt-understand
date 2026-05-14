@@ -8,6 +8,7 @@ import {
   PanelRight,
   Play,
   RotateCcw,
+  Search,
   ShieldCheck,
   Square,
   Terminal,
@@ -37,27 +38,205 @@ type ToolHistoryItem = {
 
 type FieldValue = string | number | boolean | undefined;
 
-const suggestions = ['I want to download some videos', 'Make a small image resize tool', 'Create a batch file renamer', 'Pull audio from a video'];
+type ToolExample = {
+  title: string;
+  description: string;
+  prompt: string;
+  category: string;
+};
 
-const moreSuggestions = [
-  'SSH into a server and tail logs',
-  'Create a git cleanup tool for merged branches',
-  'Find large files in a folder',
-  'Compress a folder into a zip archive',
-  'Convert a MOV video to MP4',
-  'Extract frames from a video',
-  'Resize a folder of images',
-  'Search logs for errors by date range',
-  'Run npm install and tests for a project',
-  'Start a Docker compose stack',
-  'Show Docker logs for a service',
-  'Sync two folders with rsync',
-  'Download a webpage as markdown',
-  'Batch rename screenshots by date',
-  'Create a Python virtualenv and install packages',
-  'Ping a list of hosts and show results',
-  'Run a database backup command',
-  'Generate thumbnails for videos'
+const suggestions = [
+  'I want to download some videos',
+  'Make a small image resize tool',
+  'Create a batch file renamer',
+  'Pull audio from a video',
+  'SSH into a server',
+  'Find large files'
+];
+
+const featuredExample: ToolExample = {
+  title: 'Server log watcher',
+  description: 'SSH into a host, choose a log file, and stream matching lines.',
+  prompt: 'SSH into a server and tail logs with fields for host, user, log path, and search filter',
+  category: 'Remote'
+};
+
+const toolExamples: ToolExample[] = [
+  featuredExample,
+  {
+    title: 'Video downloader',
+    description: 'Download videos with quality, folder, subtitle, and audio options.',
+    prompt: 'Create a video downloader with URL list, quality selector, output folder, subtitles, and audio-only toggle',
+    category: 'Media'
+  },
+  {
+    title: 'Image resizer',
+    description: 'Resize batches with width, format, quality, and color options.',
+    prompt: 'Make a batch image resize tool with folder picker, width slider, output format, quality slider, and background color',
+    category: 'Media'
+  },
+  {
+    title: 'Audio extractor',
+    description: 'Pull audio from videos into MP3, WAV, or AAC.',
+    prompt: 'Build an audio extractor for video files with format, bitrate, input folder, and output folder controls',
+    category: 'Media'
+  },
+  {
+    title: 'Video converter',
+    description: 'Convert MOV, MKV, or AVI files to MP4 with preset controls.',
+    prompt: 'Convert videos to MP4 with input folder, output folder, codec preset, CRF slider, and overwrite toggle',
+    category: 'Media'
+  },
+  {
+    title: 'Frame extractor',
+    description: 'Export video frames at a chosen interval.',
+    prompt: 'Extract frames from a video with source file path, output folder, frame interval, and image format',
+    category: 'Media'
+  },
+  {
+    title: 'Thumbnail generator',
+    description: 'Generate thumbnails for a folder of videos.',
+    prompt: 'Generate thumbnails for videos with input folder, output folder, timestamp, width slider, and JPEG quality slider',
+    category: 'Media'
+  },
+  {
+    title: 'Batch renamer',
+    description: 'Rename files using prefixes, dates, counters, and extensions.',
+    prompt: 'Create a batch file renamer with folder picker, filename pattern, starting number, extension filter, and dry-run checkbox',
+    category: 'Files'
+  },
+  {
+    title: 'Large file finder',
+    description: 'Find and graph the largest files in a folder.',
+    prompt: 'Find large files in a folder with minimum size slider, extension filter, max results, and a bar chart summary',
+    category: 'Files'
+  },
+  {
+    title: 'Folder zipper',
+    description: 'Compress folders with optional password and exclude patterns.',
+    prompt: 'Compress a folder into a zip archive with source folder, destination folder, archive name, and exclude patterns',
+    category: 'Files'
+  },
+  {
+    title: 'Rsync sync',
+    description: 'Sync two folders with delete, dry-run, and exclude options.',
+    prompt: 'Sync two folders with rsync using source, destination, delete toggle, dry-run toggle, and exclude patterns',
+    category: 'Files'
+  },
+  {
+    title: 'Duplicate finder',
+    description: 'Find duplicate files by checksum.',
+    prompt: 'Find duplicate files in a folder by checksum with minimum size, extension filter, and output report path',
+    category: 'Files'
+  },
+  {
+    title: 'Git cleanup',
+    description: 'Prune merged branches and clean stale refs.',
+    prompt: 'Create a git cleanup tool for merged branches with repo folder, base branch, dry-run toggle, and remote prune option',
+    category: 'Code'
+  },
+  {
+    title: 'Test runner',
+    description: 'Run npm install, lint, tests, and build with toggles.',
+    prompt: 'Run npm install and tests for a project with project folder, package manager select, lint toggle, test toggle, and build toggle',
+    category: 'Code'
+  },
+  {
+    title: 'Python environment',
+    description: 'Create a venv and install requirements.',
+    prompt: 'Create a Python virtualenv and install packages with project folder, Python version, requirements file, and extra packages',
+    category: 'Code'
+  },
+  {
+    title: 'Docker stack',
+    description: 'Start, stop, rebuild, and inspect compose services.',
+    prompt: 'Start a Docker compose stack with project folder, compose file, service selector, rebuild toggle, and logs toggle',
+    category: 'DevOps'
+  },
+  {
+    title: 'Docker logs',
+    description: 'Follow service logs with search and line count controls.',
+    prompt: 'Show Docker logs for a service with container or compose service, tail count slider, follow toggle, and grep filter',
+    category: 'DevOps'
+  },
+  {
+    title: 'Host pinger',
+    description: 'Ping a list of hosts and summarize packet loss.',
+    prompt: 'Ping a list of hosts with count slider, timeout slider, and a bar chart for packet loss',
+    category: 'Network'
+  },
+  {
+    title: 'Port scanner',
+    description: 'Check common or custom ports on a host.',
+    prompt: 'Check open ports for a host with hostname, port range, timeout, and only-open toggle',
+    category: 'Network'
+  },
+  {
+    title: 'DNS lookup',
+    description: 'Run DNS queries with record type and resolver controls.',
+    prompt: 'Create a DNS lookup tool with domain, record type select, resolver field, and trace toggle',
+    category: 'Network'
+  },
+  {
+    title: 'Log search',
+    description: 'Search logs by date range, severity, and text.',
+    prompt: 'Search logs for errors by date range with log folder, severity select, search text, since date, and max results',
+    category: 'Logs'
+  },
+  {
+    title: 'Archive extractor',
+    description: 'Extract zip, tar, and gz archives safely.',
+    prompt: 'Extract an archive with archive path, destination folder, overwrite toggle, and list-only toggle',
+    category: 'Files'
+  },
+  {
+    title: 'Database backup',
+    description: 'Run a configurable local database backup command.',
+    prompt: 'Run a database backup command with database type, host, port, database name, output folder, and gzip toggle',
+    category: 'Data'
+  },
+  {
+    title: 'CSV sampler',
+    description: 'Preview and sample large CSV files.',
+    prompt: 'Create a CSV sampler with file path, row count slider, delimiter select, and output path',
+    category: 'Data'
+  },
+  {
+    title: 'JSON formatter',
+    description: 'Format, validate, or compact JSON files.',
+    prompt: 'Build a JSON formatter with input file, output file, compact toggle, sort keys toggle, and validation-only toggle',
+    category: 'Data'
+  },
+  {
+    title: 'Markdown downloader',
+    description: 'Download a webpage and save it as markdown.',
+    prompt: 'Download a webpage as markdown with URL, output folder, filename, include images toggle, and readability mode',
+    category: 'Web'
+  },
+  {
+    title: 'Screenshot capture',
+    description: 'Capture webpages with viewport and output controls.',
+    prompt: 'Capture a webpage screenshot with URL, viewport width, viewport height, output folder, full-page toggle, and image format',
+    category: 'Web'
+  },
+  {
+    title: 'Clipboard cleaner',
+    description: 'Transform pasted text using local shell tools.',
+    prompt: 'Create a text cleanup tool with textarea input, transform select, case conversion, and copy output command',
+    category: 'Text'
+  },
+  {
+    title: 'PDF splitter',
+    description: 'Split or extract selected pages from PDFs.',
+    prompt: 'Split a PDF with input file, page range, output folder, and filename pattern',
+    category: 'Documents'
+  },
+  {
+    title: 'OCR runner',
+    description: 'Run OCR on images or PDFs using local tools.',
+    prompt: 'Run OCR on a folder of images with language select, output folder, PDF toggle, and confidence report metric',
+    category: 'Documents'
+  }
 ];
 
 const toolHistoryStorageKey = 'uiterm.generatedTools.v1';
@@ -232,20 +411,19 @@ export function App() {
     <main className="scheme-only-dark flex h-screen flex-col bg-[#0a0a0b] text-neutral-100">
       <header className="app-drag flex h-12 shrink-0 select-none items-center justify-between border-b border-white/8 bg-[#101012] pr-4 pl-24">
         <div className="flex items-center gap-3 text-sm text-neutral-400">
-          <TerminalSquare size={17} className="text-neutral-500" />
-          <span>UITerm</span>
+          <button
+            type="button"
+            onClick={startNewTask}
+            className="app-no-drag flex select-none items-center gap-3 rounded-md px-1 py-1 text-neutral-400 hover:bg-white/[0.04] hover:text-neutral-200"
+            title="New task"
+          >
+            <TerminalSquare size={17} className="text-neutral-500" />
+            <span>UITerm</span>
+          </button>
           <span className="text-neutral-700">/</span>
           <span className="font-medium text-neutral-200">{taskTitle}</span>
         </div>
         <div className="app-no-drag flex items-center gap-2">
-          <div className="flex items-center gap-2 px-2 text-sm text-neutral-500">
-            {status === 'Completed' ? (
-              <span className="size-1.5 rounded-full bg-emerald-400" />
-            ) : (
-              <span className="size-1.5 rounded-full bg-neutral-600" />
-            )}
-            {status}
-          </div>
           <button
             type="button"
             onClick={() => setSidebarOpen(current => !current)}
@@ -503,8 +681,8 @@ function InitialTaskDraft(props: {
         />
       </div>
 
-      <div className="mt-auto pb-6">
-        <div className="flex max-w-2xl flex-wrap gap-2">
+      <div className="mt-auto flex justify-center pb-2">
+        <div className="flex max-w-3xl flex-wrap justify-center gap-2">
           {suggestions.map(suggestion => (
             <button
               key={suggestion}
@@ -532,14 +710,23 @@ function InitialTaskDraft(props: {
 
 function IdeasDialog(props: { onClose: () => void; onChoose: (idea: string) => void }) {
   const { onClose, onChoose } = props;
+  const [query, setQuery] = useState('');
+  const filteredExamples = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedQuery) return toolExamples;
+
+    return toolExamples.filter(example =>
+      [example.title, example.description, example.category, example.prompt].some(value => value.toLowerCase().includes(normalizedQuery))
+    );
+  }, [query]);
 
   return (
-    <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/60 px-6">
-      <div className="app-no-drag w-full max-w-2xl rounded-xl bg-[#18191b] ring-1 ring-white/10">
-        <div className="flex select-none items-center justify-between border-b border-white/8 px-4 py-3">
-          <div>
-            <div className="text-sm font-medium text-neutral-100">More tool ideas</div>
-            <div className="mt-1 text-sm text-neutral-500">Pick one, then edit it before sending.</div>
+    <div className="fixed inset-0 z-20 bg-[#0d0d0e]">
+      <div className="app-no-drag flex h-full flex-col">
+        <div className="flex h-12 shrink-0 select-none items-center justify-between border-b border-white/8 pr-4 pl-24">
+          <div className="flex items-center gap-3 text-sm text-neutral-400">
+            <span className="rounded-md bg-white/[0.06] px-2 py-1 text-neutral-100">Examples</span>
+            <span>Tool gallery</span>
           </div>
           <button
             type="button"
@@ -550,17 +737,69 @@ function IdeasDialog(props: { onClose: () => void; onChoose: (idea: string) => v
             <X size={16} />
           </button>
         </div>
-        <div className="grid max-h-[60vh] gap-2 overflow-y-auto p-3 sm:grid-cols-2">
-          {moreSuggestions.map(idea => (
-            <button
-              key={idea}
-              type="button"
-              onClick={() => onChoose(idea)}
-              className="select-none rounded-lg bg-white/[0.035] px-3 py-2.5 text-left text-sm leading-5 text-neutral-300 ring-1 ring-white/8 hover:bg-white/[0.07] hover:text-neutral-100"
-            >
-              {idea}
-            </button>
-          ))}
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-10">
+          <div className="mx-auto w-full max-w-5xl">
+            <h2 className="text-center text-4xl font-medium tracking-tight text-neutral-100">Make UITerm work your way</h2>
+
+            <div className="mx-auto mt-8 flex max-w-3xl items-center gap-3">
+              <div className="grid h-10 flex-1 grid-cols-[auto_1fr] items-center gap-2 rounded-lg bg-[#202124] px-3 ring-1 ring-white/10">
+                <Search size={18} className="text-neutral-500" />
+                <input
+                  value={query}
+                  onChange={event => setQuery(event.target.value)}
+                  placeholder="Search examples"
+                  className="h-full bg-transparent text-sm text-neutral-100 outline-none placeholder:text-neutral-500"
+                />
+              </div>
+              <div className="hidden h-10 select-none items-center rounded-lg bg-white/[0.05] px-3 text-sm text-neutral-300 ring-1 ring-white/8 sm:flex">
+                {filteredExamples.length} ideas
+              </div>
+            </div>
+
+            <div className="mt-8 overflow-hidden rounded-2xl bg-[#121724] ring-1 ring-white/10">
+              <div className="flex min-h-64 flex-col items-center justify-center bg-[radial-gradient(circle_at_30%_15%,rgba(106,164,255,0.26),transparent_36%),radial-gradient(circle_at_78%_36%,rgba(168,85,247,0.2),transparent_34%)] px-6 py-10 text-center">
+                <div className="rounded-full bg-black/50 px-4 py-2 text-sm text-neutral-300 ring-1 ring-white/10">
+                  <span className="text-neutral-500">{featuredExample.category}</span>
+                  <span className="mx-2 text-neutral-700">/</span>
+                  {featuredExample.title}
+                </div>
+                <p className="mt-4 max-w-xl text-lg text-neutral-200">{featuredExample.description}</p>
+                <button
+                  type="button"
+                  onClick={() => onChoose(featuredExample.prompt)}
+                  className="mt-7 rounded-lg bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-950 hover:bg-white"
+                >
+                  Try in task
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-10 flex select-none items-center justify-between border-b border-white/8 pb-3">
+              <div className="text-lg font-medium text-neutral-100">Featured</div>
+              <div className="text-sm text-neutral-600">Click an example to fill the prompt</div>
+            </div>
+
+            <div className="grid gap-x-14 gap-y-3 py-6 sm:grid-cols-2">
+              {filteredExamples.map(example => (
+                <button
+                  key={`${example.category}-${example.title}`}
+                  type="button"
+                  onClick={() => onChoose(example.prompt)}
+                  className="grid select-none grid-cols-[44px_1fr_auto] items-center gap-4 rounded-xl px-3 py-3 text-left hover:bg-white/[0.04]"
+                >
+                  <span className="flex size-11 items-center justify-center rounded-xl bg-white/[0.06] text-sm font-medium text-neutral-200 ring-1 ring-white/10">
+                    {example.category.slice(0, 2)}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-medium text-neutral-100">{example.title}</span>
+                    <span className="mt-1 block truncate text-sm text-neutral-500">{example.description}</span>
+                  </span>
+                  <span className="flex size-8 items-center justify-center rounded-lg bg-white/[0.05] text-xl text-neutral-400 ring-1 ring-white/8">+</span>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -843,7 +1082,7 @@ function ToolForm(props: {
   );
 }
 
-function FieldRenderer(props: { field: GeneratedField; value: string | boolean | undefined; onChange: (value: string | boolean) => void }) {
+function FieldRenderer(props: { field: GeneratedField; value: FieldValue; onChange: (value: string | number | boolean) => void }) {
   const { field, value, onChange } = props;
   const inputId = `field-${field.name}`;
 
@@ -892,6 +1131,57 @@ function FieldRenderer(props: { field: GeneratedField; value: string | boolean |
             </option>
           ))}
         </select>
+      ) : null}
+
+      {field.type === 'number' ? (
+        <input
+          id={inputId}
+          name={field.name}
+          type="number"
+          value={String(value ?? '')}
+          min={field.min}
+          max={field.max}
+          step={field.step}
+          onChange={event => onChange(event.target.value === '' ? '' : event.target.valueAsNumber)}
+          placeholder={field.placeholder}
+          className="h-10 w-full rounded-lg bg-[#202124] px-3 text-sm text-neutral-100 ring-1 ring-white/10 outline-none transition placeholder:text-neutral-600 focus:ring-2 focus:ring-neutral-500 max-sm:text-base"
+        />
+      ) : null}
+
+      {field.type === 'slider' ? (
+        <div className="rounded-lg bg-[#202124] px-3 py-3 ring-1 ring-white/10">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <span className="text-sm text-neutral-500">
+              {field.min ?? 0} - {field.max ?? 100}
+            </span>
+            <span className="font-mono text-sm text-neutral-300">{String(value ?? field.defaultValue ?? field.min ?? 0)}</span>
+          </div>
+          <input
+            id={inputId}
+            name={field.name}
+            type="range"
+            value={Number(value ?? field.defaultValue ?? field.min ?? 0)}
+            min={field.min ?? 0}
+            max={field.max ?? 100}
+            step={field.step ?? 1}
+            onChange={event => onChange(event.target.valueAsNumber)}
+            className="w-full accent-[#6aa4ff]"
+          />
+        </div>
+      ) : null}
+
+      {field.type === 'color' ? (
+        <div className="flex h-10 items-center gap-3 rounded-lg bg-[#202124] px-3 ring-1 ring-white/10">
+          <input
+            id={inputId}
+            name={field.name}
+            type="color"
+            value={String(value ?? field.defaultValue ?? '#6aa4ff')}
+            onChange={event => onChange(event.target.value)}
+            className="size-6 cursor-pointer appearance-none rounded border-0 bg-transparent p-0"
+          />
+          <span className="font-mono text-sm text-neutral-300">{String(value ?? field.defaultValue ?? '#6aa4ff')}</span>
+        </div>
       ) : null}
 
       {field.type === 'checkbox' ? (
@@ -943,8 +1233,20 @@ function FieldRenderer(props: { field: GeneratedField; value: string | boolean |
   );
 }
 
-function inferDefaults(fields: GeneratedField[]) {
-  return Object.fromEntries(fields.map(field => [field.name, field.defaultValue ?? (field.type === 'checkbox' ? false : '')]));
+function inferDefaults(fields: GeneratedField[]): Record<string, FieldValue> {
+  return Object.fromEntries(
+    fields.map(field => [
+      field.name,
+      field.defaultValue ??
+        (field.type === 'checkbox'
+          ? false
+          : field.type === 'slider' || field.type === 'number'
+            ? field.min ?? 0
+            : field.type === 'color'
+              ? '#6aa4ff'
+              : '')
+    ])
+  );
 }
 
 function toTerminalEntry(event: ToolOutputEvent): TerminalEntry {
@@ -964,7 +1266,7 @@ function quotePreview(value: string) {
   return /\s/.test(value) ? `"${value}"` : value;
 }
 
-function renderCommandTemplate(template: string, values: Record<string, string | boolean | undefined>) {
+function renderCommandTemplate(template: string, values: Record<string, FieldValue>) {
   return template.replace(/\{\{([A-Za-z0-9_]+)\}\}/g, (_match, key: string) => {
     const value = values[key];
     if (typeof value === 'boolean') return value ? 'true' : 'false';

@@ -71,7 +71,9 @@ ipcMain.handle("ai:compose-ui", async (_event, userPrompt: string): Promise<Gene
         "Create a compact UI for any local command-line task the user asks for.",
         "Use tool shell.run for executable tasks. Use noop only when there is genuinely nothing local to run.",
         "For shell.run, include a command template in command. Use {{fieldName}} placeholders for user inputs.",
-        "Keep fields practical and typed. Prefer text, textarea, select, checkbox, and folder fields that map to command arguments.",
+        "Keep fields practical and typed. Use text, textarea, select, checkbox, folder, number, slider, and color fields that map to command arguments.",
+        "Use blocks for generated non-input UI: box for notes/status panels, image for image previews, metric for single values, and barChart for simple graphs.",
+        "When a request benefits from richer UI, include blocks before fields, such as metrics for counts, bar charts for comparisons, boxes for warnings/instructions, and image blocks for preview URLs or generated file outputs.",
         "The app shell-quotes placeholder values before execution, so do not wrap placeholders in quotes.",
         "For video download requests you may use yt-dlp.download, but shell.run is valid for everything else including ssh, git, ffmpeg, python, npm, docker, rsync, find, grep, tar, zip, database CLIs, network diagnostics, and system tools.",
         "When useful, generate multiple fields so the user can safely adjust hostnames, folders, flags, formats, services, ports, and filters before running."
