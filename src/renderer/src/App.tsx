@@ -53,6 +53,7 @@ type ToolSnapshot = {
   ui: GeneratedUi;
   values: Record<string, FieldValue>;
   commandPreview: string;
+  recentLogs: string[];
 };
 
 type ParsedProgress = {
@@ -324,20 +325,21 @@ export function App() {
     if (!prompt.trim() || composing) return;
 
     const userText = prompt.trim();
+    const recentLogs = getRecentLogLines(logs, 120);
     const composeRequest = {
       prompt: userText,
       messages: [...messages, { role: 'user' as const, content: userText }].slice(-10),
       currentUi: ui,
       values,
       commandPreview,
-      recentLogs: logs
-        .slice(-20)
-        .map(entry => entry.text)
-        .join('')
-        .split(/\r?\n/)
-        .map(line => line.trim())
-        .filter(Boolean)
-        .slice(-20)
+      recentLogs,
+      previousTools: previousTools.slice(-5).map(tool => ({
+        title: tool.ui.title,
+        summary: tool.ui.summary,
+        values: tool.values,
+        commandPreview: tool.commandPreview,
+        recentLogs: tool.recentLogs
+      }))
     };
     if (ui) {
       const snapshotId = activeToolId ?? crypto.randomUUID();
@@ -350,7 +352,8 @@ export function App() {
                 id: snapshotId,
                 ui,
                 values: { ...values },
-                commandPreview
+                commandPreview,
+                recentLogs
               }
             ]
       );
@@ -1648,6 +1651,19 @@ function getTerminalPreviewLines(entries: TerminalEntry[]) {
     .map(line => line.trim())
     .filter(Boolean)
     .slice(-3);
+}
+
+function getRecentLogLines(entries: TerminalEntry[], maxLines: number) {
+  return stripAnsi(
+    entries
+      .map(entry => entry.text.replace(/\r/g, '\n'))
+      .join('')
+  )
+    .split(/\n/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .filter(line => !/^\[download\]\s+\d+(?:\.\d+)?%/.test(line))
+    .slice(-maxLines);
 }
 
 function stripAnsi(value: string) {

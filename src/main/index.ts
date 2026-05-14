@@ -3,7 +3,7 @@ import { generateObject } from 'ai';
 import { app, BrowserWindow, dialog, ipcMain, type WebContents } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { accessSync, constants, existsSync, readFileSync } from 'node:fs';
+import { accessSync, constants, existsSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
@@ -71,7 +71,7 @@ ipcMain.handle('ai:compose-ui', async (_event, request: ComposeUiRequest | strin
   try {
     const openai = createOpenAI({ apiKey: openaiApiKey });
 
-    const modelName = localEnv.OPENAI_MODEL?.trim() || 'gpt-4.1-mini';
+    const modelName = localEnv.OPENAI_MODEL?.trim() || 'gpt-5.2';
     const result = await generateObject({
       model: openai(modelName),
       schema: generatedUiSchema,
@@ -91,6 +91,8 @@ ipcMain.handle('ai:compose-ui', async (_event, request: ComposeUiRequest | strin
         'When useful, generate multiple fields so the user can safely adjust hostnames, folders, flags, formats, services, ports, and filters before running.',
         'The user may be iterating on a previous generated tool. Use the provided conversation context, current UI values, command preview, and recent run output to resolve references like "that", "it", "the downloaded file", "same folder", or "the previous command".',
         'When the user asks to modify a previous artifact or result, preserve and prefill relevant paths, URLs, folders, formats, and options from context instead of asking for them again.',
+        'For follow-up requests like "convert that downloaded file", use the concrete producedFiles path from context as the file field defaultValue and command input. Do not re-run the previous download or generation step.',
+        'For follow-up requests like "play it", "open it", or "watch it", generate a one-click opener using open and the concrete producedFiles path from context.',
         'Never hardcode guessed filenames like video.mp4, output.mp4, result.txt, or %(title)s as later input paths. If a later step needs a file path, expose an explicit file field or use a concrete path from recent output.',
         'Use sparse UI copy: titles should be 2 to 5 words, summaries should be one short sentence, field descriptions should be omitted unless truly helpful, and any description should be under 8 words.',
         'Avoid explanatory box blocks for obvious workflows. Prefer concise controls over paragraphs.',
@@ -115,6 +117,18 @@ function normalizeComposeRequest(request: ComposeUiRequest | string): ComposeUiR
 }
 
 function buildComposePrompt(request: ComposeUiRequest): string {
+  const currentRunOutput = (request.recentLogs ?? []).slice(-120);
+  const previousTools = (request.previousTools ?? []).slice(-5).map(tool => {
+    const recentLogs = tool.recentLogs.slice(-120);
+    return {
+      title: tool.title,
+      summary: tool.summary,
+      values: tool.values,
+      commandPreview: tool.commandPreview,
+      recentRunOutput: recentLogs,
+      producedFiles: extractExistingOutputPaths(recentLogs.join('\n'), app.getPath('home'))
+    };
+  });
   const context = {
     recentMessages: (request.messages ?? []).slice(-10),
     currentUi: request.currentUi
@@ -135,7 +149,9 @@ function buildComposePrompt(request: ComposeUiRequest): string {
       : null,
     currentValues: request.values ?? {},
     currentCommandPreview: request.commandPreview,
-    recentRunOutput: (request.recentLogs ?? []).slice(-20)
+    recentRunOutput: currentRunOutput,
+    producedFiles: extractExistingOutputPaths(currentRunOutput.join('\n'), app.getPath('home')),
+    previousTools
   };
 
   return [
@@ -151,6 +167,7 @@ async function reviewGeneratedUi(
   request: ComposeUiRequest,
   draftUi: GeneratedUi
 ): Promise<GeneratedUi> {
+  const toolAvailability = inspectGeneratedUiToolAvailability(draftUi);
   const result = await generateObject({
     model: openai(modelName),
     schema: generatedUiSchema,
@@ -162,11 +179,18 @@ async function reviewGeneratedUi(
       'Every field that affects execution should be represented in the command.',
       'Do not invent hardcoded local paths unless supplied by the user context.',
       'Use file fields for individual input/output paths and folder fields for directories; prefer picker-backed fields over plain text path inputs.',
+      'When context contains producedFiles and the latest request refers to that prior output, the UI must use a file field defaultValue set to the matching producedFiles path and the command must operate on that field.',
+      'For follow-up transforms, do not include the old download/generation command again unless the user explicitly asked to redo it.',
+      'For requests to play, open, or watch an existing produced file, use macOS open against that file. Do not redownload or transform it.',
       'Do not use an output template, glob, CLI-specific placeholder, or generated filename pattern as if it were a concrete file path in a later command.',
       'Reject guessed filenames such as video.mp4, output.mp4, result.txt, and %(title)s whenever the real produced filename can differ.',
       'If a command must use a later output file, add an explicit output file/path field and reference that field consistently.',
       'If the request depends on an external CLI, keep it as a shell.run command. The runtime will check whether the CLI exists.',
+      'Use the tool availability report. If the generated UI says a tool is missing but the report has installed alternatives, convert the UI back into a runnable shell.run tool using the installed alternative.',
+      'If the generated command uses a missing executable, replace it with an installed equivalent from alternatives when one fits the intent.',
+      'Do not return noop for a missing executable when an installed equivalent appears in alternatives.',
       'The app runs on macOS. Replace Linux-only openers such as xdg-open with open.',
+      'Use valid shell option syntax. For strict mode use set -euo pipefail, not set -euo errexit.',
       'Remove safety notes that only say to ensure a CLI is installed or available.',
       'If the command cannot be made reasonably correct or safe, return a noop UI explaining the missing information in one short sentence.'
     ].join(' '),
@@ -174,12 +198,48 @@ async function reviewGeneratedUi(
       `Latest user request: ${request.prompt}`,
       'Context:',
       buildComposePrompt(request),
+      'Tool availability report:',
+      JSON.stringify(toolAvailability, null, 2),
       'Draft UI to review:',
       JSON.stringify(draftUi, null, 2)
     ].join('\n\n')
   });
 
   return generatedUiSchema.parse(result.object);
+}
+
+function inspectGeneratedUiToolAvailability(ui: GeneratedUi) {
+  const values = Object.fromEntries(ui.fields.map(field => [field.name, field.defaultValue ?? '']));
+  const command = renderCommandTemplate(ui.command || ui.previewCommand || '', values).trim();
+  const executableReferences = new Set<string>([
+    ...extractExecutableTokens(command),
+    ...extractMissingExecutableReferences(JSON.stringify(ui))
+  ]);
+
+  return [...executableReferences].map(executable => ({
+    executable,
+    installed: executableAvailable(executable),
+    alternatives: executableAvailable(executable) ? [] : findExecutableAlternatives(executable)
+  }));
+}
+
+function extractMissingExecutableReferences(text: string): string[] {
+  const references = new Set<string>();
+  const patterns = [
+    /\b([A-Za-z0-9][A-Za-z0-9._+-]*)\s+tool\s+is\s+not\s+installed/gi,
+    /\b([A-Za-z0-9][A-Za-z0-9._+-]*)\s+is\s+not\s+installed/gi,
+    /cannot\s+find\s+["'`]?([A-Za-z0-9][A-Za-z0-9._+-]*)["'`]?/gi,
+    /install\s+["'`]?([A-Za-z0-9][A-Za-z0-9._+-]*)["'`]?/gi
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const reference = match[1]?.trim();
+      if (reference && reference.includes('-')) references.add(reference);
+    }
+  }
+
+  return [...references];
 }
 
 ipcMain.handle('dialog:select-file', async () => {
@@ -333,7 +393,7 @@ async function reviseFailedCommand(request: ToolRunRequest, failedCommand: strin
 
   try {
     const openai = createOpenAI({ apiKey: openaiApiKey });
-    const modelName = localEnv.OPENAI_REVIEW_MODEL?.trim() || localEnv.OPENAI_MODEL?.trim() || 'gpt-4.1-mini';
+    const modelName = localEnv.OPENAI_REVIEW_MODEL?.trim() || localEnv.OPENAI_MODEL?.trim() || 'gpt-5.2';
     const result = await generateObject({
       model: openai(modelName),
       schema: z.object({
@@ -389,7 +449,8 @@ function reconcileCommandWithProducedFiles(command: string, output: string, cwd:
 
 function extractExistingOutputPaths(output: string, cwd: string): string[] {
   const candidates = new Set<string>();
-  const pathPattern = /"([^"\n]*(?:\/|\.\/)[^"\n]*)"|'([^'\n]*(?:\/|\.\/)[^'\n]*)'|((?:\.{1,2}\/|\/|~\/)[^\s,;:)]+)/g;
+  const pathPattern =
+    /"([^"\n]*(?:(?:\/|\.\/)[^"\n]*|\.[A-Za-z0-9]{1,8}))"|'([^'\n]*(?:(?:\/|\.\/)[^'\n]*|\.[A-Za-z0-9]{1,8}))'|((?:\.{1,2}\/|\/|~\/)[^\s,;:)]+)/g;
   for (const match of output.matchAll(pathPattern)) {
     const rawPath = match[1] ?? match[2] ?? match[3];
     if (!rawPath) continue;
@@ -470,7 +531,7 @@ function buildCommand(request: ToolRunRequest): {
     const command = renderCommandTemplate(request.command || '', request.values).trim();
     if (!command) throw new Error('No command was generated.');
     const argv = splitCommandLine(command);
-    const executable = findExecutableToCheck(argv);
+    const executable = extractExecutableTokens(command)[0] ?? findExecutableToCheck(argv);
     if (executable) ensureExecutableAvailable(executable);
 
     if (argv.length > 0 && !needsShell(command)) {
@@ -501,11 +562,51 @@ function shellQuote(value: string): string {
 }
 
 function findExecutableToCheck(argv: string[]): string | null {
+  return findExecutableInTokens(argv);
+}
+
+function extractExecutableTokens(command: string): string[] {
+  const tokens = splitCommandLine(command.replace(/\r?\n/g, ' ; '));
+  const executables: string[] = [];
+  let segment: string[] = [];
+
+  function flushSegment() {
+    const executable = findExecutableInTokens(segment);
+    if (executable) executables.push(executable);
+    segment = [];
+  }
+
+  for (const token of tokens) {
+    if (shellControlTokens.has(token)) {
+      flushSegment();
+      continue;
+    }
+    segment.push(token);
+  }
+
+  flushSegment();
+  return [...new Set(executables)];
+}
+
+function findExecutableInTokens(argv: string[]): string | null {
   let skipNext = false;
+  let skipUntilControlToken = false;
 
   for (const token of argv) {
+    if (shellControlTokens.has(token)) {
+      skipUntilControlToken = false;
+      continue;
+    }
+
+    if (skipUntilControlToken) continue;
+
     if (skipNext) {
       skipNext = false;
+      continue;
+    }
+
+    if (shellOptionBuiltins.has(token)) {
+      skipUntilControlToken = true;
       continue;
     }
 
@@ -541,6 +642,66 @@ function ensureExecutableAvailable(executable: string) {
   );
 }
 
+function executableAvailable(executable: string) {
+  if (executable.includes('/')) return isExecutable(executable);
+  return expandGuiPath(process.env.PATH)
+    .split(':')
+    .filter(Boolean)
+    .some(directory => isExecutable(join(directory, executable)));
+}
+
+function findExecutableAlternatives(executable: string): string[] {
+  const names = listPathExecutables();
+  const targetParts = executableParts(executable);
+  return names
+    .map(name => ({ name, score: executableSimilarityScore(targetParts, executableParts(name), executable, name) }))
+    .filter(candidate => candidate.score > 0)
+    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+    .slice(0, 12)
+    .map(candidate => candidate.name);
+}
+
+function listPathExecutables() {
+  const names = new Set<string>();
+  for (const directory of expandGuiPath(process.env.PATH).split(':').filter(Boolean)) {
+    try {
+      for (const name of readdirSync(directory)) {
+        if (isExecutable(join(directory, name))) names.add(name);
+      }
+    } catch {
+      // Ignore unreadable PATH entries.
+    }
+  }
+  return [...names];
+}
+
+function executableParts(value: string) {
+  return value
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .map(part => part.trim())
+    .filter(Boolean);
+}
+
+function executableSimilarityScore(targetParts: string[], candidateParts: string[], target: string, candidate: string) {
+  const normalizedTarget = targetParts.join('');
+  const normalizedCandidate = candidateParts.join('');
+  if (!normalizedTarget || !normalizedCandidate) return 0;
+  if (normalizedCandidate === normalizedTarget) return 100;
+  if (normalizedCandidate.includes(normalizedTarget) || normalizedTarget.includes(normalizedCandidate)) return 80;
+
+  let score = 0;
+  for (const targetPart of targetParts) {
+    for (const candidatePart of candidateParts) {
+      if (candidatePart === targetPart) score += 20;
+      else if (candidatePart.startsWith(targetPart) || targetPart.startsWith(candidatePart)) score += 12;
+    }
+  }
+
+  if (candidate.includes(target) || target.includes(candidate)) score += 20;
+  return score;
+}
+
 function isExecutable(path: string) {
   try {
     accessSync(path, constants.X_OK);
@@ -552,6 +713,7 @@ function isExecutable(path: string) {
 
 const shellControlTokens = new Set(['&&', '||', '|', ';', '&', '(', ')']);
 const pathArgumentBuiltins = new Set(['.', 'cd', 'source']);
+const shellOptionBuiltins = new Set(['set', 'unset', 'ulimit', 'umask']);
 const shellBuiltins = new Set([
   '.',
   'alias',

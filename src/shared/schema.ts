@@ -58,6 +58,13 @@ export type ComposeUiRequest = {
   values?: Record<string, string | number | boolean | undefined>;
   commandPreview?: string;
   recentLogs?: string[];
+  previousTools?: Array<{
+    title: string;
+    summary: string;
+    values: Record<string, string | number | boolean | undefined>;
+    commandPreview: string;
+    recentLogs: string[];
+  }>;
 };
 
 export type ToolOutputEvent =
