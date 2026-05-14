@@ -73,7 +73,8 @@ ipcMain.handle("ai:compose-ui", async (_event, userPrompt: string): Promise<Gene
         "For shell.run, include a command template in command. Use {{fieldName}} placeholders for user inputs.",
         "Keep fields practical and typed. Prefer text, textarea, select, checkbox, and folder fields that map to command arguments.",
         "The app shell-quotes placeholder values before execution, so do not wrap placeholders in quotes.",
-        "For video download requests you may use yt-dlp.download, but shell.run is valid for everything else including ssh, git, ffmpeg, python, npm, and system tools."
+        "For video download requests you may use yt-dlp.download, but shell.run is valid for everything else including ssh, git, ffmpeg, python, npm, docker, rsync, find, grep, tar, zip, database CLIs, network diagnostics, and system tools.",
+        "When useful, generate multiple fields so the user can safely adjust hostnames, folders, flags, formats, services, ports, and filters before running."
       ].join(" "),
       prompt: `User request: ${userPrompt}`
     });

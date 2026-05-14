@@ -12,7 +12,8 @@ import {
   Square,
   Terminal,
   TerminalSquare,
-  WandSparkles
+  WandSparkles,
+  X
 } from "lucide-react";
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useState } from "react";
 import type { GeneratedField, GeneratedUi, ToolOutputEvent } from "../../shared/schema";
@@ -25,11 +26,41 @@ type ChatMessage = {
   content: string;
 };
 
+type ToolHistoryItem = {
+  id: string;
+  title: string;
+  summary: string;
+  request: string;
+  ui: GeneratedUi;
+  values: Record<string, string | boolean | undefined>;
+};
+
 const suggestions = [
   "I want to download some videos",
   "Make a small image resize tool",
   "Create a batch file renamer",
   "Pull audio from a video"
+];
+
+const moreSuggestions = [
+  "SSH into a server and tail logs",
+  "Create a git cleanup tool for merged branches",
+  "Find large files in a folder",
+  "Compress a folder into a zip archive",
+  "Convert a MOV video to MP4",
+  "Extract frames from a video",
+  "Resize a folder of images",
+  "Search logs for errors by date range",
+  "Run npm install and tests for a project",
+  "Start a Docker compose stack",
+  "Show Docker logs for a service",
+  "Sync two folders with rsync",
+  "Download a webpage as markdown",
+  "Batch rename screenshots by date",
+  "Create a Python virtualenv and install packages",
+  "Ping a list of hosts and show results",
+  "Run a database backup command",
+  "Generate thumbnails for videos"
 ];
 
 export function App() {
@@ -44,6 +75,9 @@ export function App() {
   const [status, setStatus] = useState("Idle");
   const [composing, setComposing] = useState(false);
   const [showOutput, setShowOutput] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [toolHistory, setToolHistory] = useState<ToolHistoryItem[]>([]);
+  const [activeToolId, setActiveToolId] = useState<string | null>(null);
 
   useEffect(() => {
     return window.uiterm.onToolOutput((event) => {
@@ -87,6 +121,7 @@ export function App() {
     setPrompt("");
     setUi(null);
     setValues({});
+    setActiveToolId(null);
     setLogs([]);
     setShowOutput(false);
     setStatus("Generating");
@@ -94,9 +129,23 @@ export function App() {
 
     try {
       const nextUi = await window.uiterm.composeUi(userText);
+      const nextValues = inferDefaults(nextUi.fields);
+      const nextToolId = crypto.randomUUID();
       setUi(nextUi);
       setTaskTitle(nextUi.title);
-      setValues(inferDefaults(nextUi.fields));
+      setValues(nextValues);
+      setActiveToolId(nextToolId);
+      setToolHistory((current) => [
+        {
+          id: nextToolId,
+          title: nextUi.title,
+          summary: nextUi.summary,
+          request: userText,
+          ui: nextUi,
+          values: nextValues
+        },
+        ...current
+      ]);
       setLogs([]);
       setStatus("Ready");
       setMessages((current) => [
@@ -132,11 +181,36 @@ export function App() {
     setMessages([]);
     setUi(null);
     setValues({});
+    setActiveToolId(null);
     setLogs([]);
     setRunId(null);
     setRunning(false);
     setStatus("Idle");
     setShowOutput(false);
+  }
+
+  function updateValues(nextValues: Record<string, string | boolean | undefined>) {
+    setValues(nextValues);
+    setToolHistory((current) =>
+      current.map((item) => (item.id === activeToolId ? { ...item, values: nextValues } : item))
+    );
+  }
+
+  function restoreTool(item: ToolHistoryItem) {
+    setPrompt("");
+    setUi(item.ui);
+    setValues(item.values);
+    setTaskTitle(item.title);
+    setActiveToolId(item.id);
+    setLogs([]);
+    setRunId(null);
+    setRunning(false);
+    setStatus("Ready");
+    setShowOutput(false);
+    setMessages([
+      { id: `${item.id}-request`, role: "user", content: item.request },
+      { id: `${item.id}-response`, role: "assistant", content: `${item.title}: ${item.summary}` }
+    ]);
   }
 
   return (
@@ -159,48 +233,93 @@ export function App() {
           </div>
           <button
             type="button"
+            onClick={() => setSidebarOpen((current) => !current)}
             className="flex size-8 select-none items-center justify-center rounded-md text-neutral-500 transition hover:bg-white/[0.04] hover:text-neutral-300"
-            title="Toggle details"
+            title="Toggle generated tools"
           >
             <PanelRight size={17} />
           </button>
         </div>
       </header>
 
-      <section className="flex min-h-0 flex-1 flex-col">
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className={cn("mx-auto flex min-h-full w-full max-w-3xl flex-col px-6 pt-10", ui ? "pb-24" : "pb-28")}>
-            {ui ? (
-              <div className="space-y-7">
-                <TaskTranscript messages={messages} />
-                <ToolForm
-                  ui={ui}
-                  values={values}
-                  setValues={setValues}
-                  commandPreview={commandPreview}
-                  running={running}
-                  logs={logs}
-                  showOutput={showOutput}
-                  onToggleOutput={() => setShowOutput((current) => !current)}
-                  onRun={runAction}
-                  onCancel={cancelRun}
-                />
-              </div>
-            ) : composing ? (
-              <GeneratingUi messages={[...messages, { id: "pending", role: "user", content: prompt || "Generating interface..." }]} />
-            ) : (
-              <InitialTaskDraft title={taskTitle} prompt={prompt} setPrompt={setPrompt} onSubmit={compose} />
-            )}
+      <section className="flex min-h-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className={cn("mx-auto flex min-h-full w-full max-w-3xl flex-col px-6 pt-10", ui ? "pb-24" : "pb-28")}>
+              {ui ? (
+                <div className="space-y-7">
+                  <TaskTranscript messages={messages} />
+                  <ToolForm
+                    ui={ui}
+                    values={values}
+                    setValues={updateValues}
+                    commandPreview={commandPreview}
+                    running={running}
+                    logs={logs}
+                    showOutput={showOutput}
+                    onToggleOutput={() => setShowOutput((current) => !current)}
+                    onRun={runAction}
+                    onCancel={cancelRun}
+                  />
+                </div>
+              ) : composing ? (
+                <GeneratingUi messages={[...messages, { id: "pending", role: "user", content: prompt || "Generating interface..." }]} />
+              ) : (
+                <InitialTaskDraft title={taskTitle} prompt={prompt} setPrompt={setPrompt} onSubmit={compose} />
+              )}
+            </div>
           </div>
+
+          {ui ? (
+            <Composer prompt={prompt} setPrompt={setPrompt} composing={composing} onSubmit={compose} onNewTask={startNewTask} />
+          ) : (
+            <InitialCommandBar prompt={prompt} setPrompt={setPrompt} composing={composing} onSubmit={compose} />
+          )}
         </div>
 
-        {ui ? (
-          <Composer prompt={prompt} setPrompt={setPrompt} composing={composing} onSubmit={compose} onNewTask={startNewTask} />
-        ) : (
-          <InitialCommandBar prompt={prompt} setPrompt={setPrompt} composing={composing} onSubmit={compose} />
-        )}
+        {sidebarOpen ? (
+          <ToolSidebar items={toolHistory} activeId={activeToolId} onSelect={restoreTool} />
+        ) : null}
       </section>
     </main>
+  );
+}
+
+function ToolSidebar(props: {
+  items: ToolHistoryItem[];
+  activeId: string | null;
+  onSelect: (item: ToolHistoryItem) => void;
+}) {
+  const { items, activeId, onSelect } = props;
+
+  return (
+    <aside className="app-no-drag flex w-80 shrink-0 select-none flex-col border-l border-white/8 bg-[#101012]">
+      <div className="border-b border-white/8 px-4 py-3">
+        <div className="text-sm font-medium text-neutral-200">Generated tools</div>
+        <div className="mt-1 text-sm text-neutral-600">{items.length === 1 ? "1 tool" : `${items.length} tools`}</div>
+      </div>
+
+      {items.length > 0 ? (
+        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+          {items.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => onSelect(item)}
+              className={cn(
+                "w-full rounded-lg px-3 py-2.5 text-left",
+                item.id === activeId ? "bg-white/[0.07]" : "hover:bg-white/[0.04]"
+              )}
+            >
+              <div className="truncate text-sm font-medium text-neutral-200">{item.title}</div>
+              <div className="mt-1 line-clamp-2 text-sm leading-5 text-neutral-500">{item.summary}</div>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="px-4 py-5 text-sm leading-6 text-neutral-500">Generated tools will show up here after you send a task.</div>
+      )}
+    </aside>
   );
 }
 
@@ -345,6 +464,12 @@ function InitialTaskDraft(props: {
   onSubmit: (event?: FormEvent) => void;
 }) {
   const { title, prompt, setPrompt, onSubmit } = props;
+  const [showMoreIdeas, setShowMoreIdeas] = useState(false);
+
+  function chooseIdea(idea: string) {
+    setPrompt(idea);
+    setShowMoreIdeas(false);
+  }
 
   return (
     <div className="flex flex-1 flex-col pt-4">
@@ -369,10 +494,56 @@ function InitialTaskDraft(props: {
             <button
               key={suggestion}
               type="button"
-              onClick={() => setPrompt(suggestion)}
+              onClick={() => chooseIdea(suggestion)}
               className="app-no-drag select-none rounded-full bg-white/[0.04] px-3 py-1.5 text-sm text-neutral-400 ring-1 ring-white/10 transition hover:bg-white/[0.07] hover:text-neutral-200"
             >
               {suggestion}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setShowMoreIdeas(true)}
+            className="app-no-drag select-none rounded-full bg-white/[0.04] px-3 py-1.5 text-sm text-neutral-300 ring-1 ring-white/10 transition hover:bg-white/[0.07] hover:text-neutral-100"
+          >
+            More
+          </button>
+        </div>
+      </div>
+
+      {showMoreIdeas ? <IdeasDialog onClose={() => setShowMoreIdeas(false)} onChoose={chooseIdea} /> : null}
+    </div>
+  );
+}
+
+function IdeasDialog(props: { onClose: () => void; onChoose: (idea: string) => void }) {
+  const { onClose, onChoose } = props;
+
+  return (
+    <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/60 px-6">
+      <div className="app-no-drag w-full max-w-2xl rounded-xl bg-[#18191b] ring-1 ring-white/10">
+        <div className="flex select-none items-center justify-between border-b border-white/8 px-4 py-3">
+          <div>
+            <div className="text-sm font-medium text-neutral-100">More tool ideas</div>
+            <div className="mt-1 text-sm text-neutral-500">Pick one, then edit it before sending.</div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex size-8 select-none items-center justify-center rounded-md text-neutral-500 hover:bg-white/[0.04] hover:text-neutral-200"
+            title="Close"
+          >
+            <X size={16} />
+          </button>
+        </div>
+        <div className="grid max-h-[60vh] gap-2 overflow-y-auto p-3 sm:grid-cols-2">
+          {moreSuggestions.map((idea) => (
+            <button
+              key={idea}
+              type="button"
+              onClick={() => onChoose(idea)}
+              className="select-none rounded-lg bg-white/[0.035] px-3 py-2.5 text-left text-sm leading-5 text-neutral-300 ring-1 ring-white/8 hover:bg-white/[0.07] hover:text-neutral-100"
+            >
+              {idea}
             </button>
           ))}
         </div>
