@@ -2,17 +2,27 @@ import {
   ArrowUp,
   ChevronDown,
   ChevronUp,
+  Code2,
+  Database,
   Eraser,
+  FileArchive,
+  FileText,
   FolderOpen,
+  Globe2,
+  Image,
   Loader2,
+  Music2,
+  Network,
   PanelRight,
   Play,
   RotateCcw,
   Search,
+  Server,
   ShieldCheck,
   Square,
   Terminal,
   TerminalSquare,
+  Video,
   WandSparkles,
   X
 } from 'lucide-react';
@@ -713,7 +723,9 @@ function InitialTaskDraft(props: {
 function IdeasDialog(props: { onClose: () => void; onChoose: (idea: { title: string; prompt: string }) => void }) {
   const { onClose, onChoose } = props;
   const [activeTab, setActiveTab] = useState<'examples' | 'gallery'>('examples');
+  const [activeCategory, setActiveCategory] = useState('All');
   const [query, setQuery] = useState('');
+  const galleryCategories = useMemo(() => ['All', ...Array.from(new Set(toolExamples.map(example => example.category)))], []);
   const filteredExamples = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     if (!normalizedQuery) return toolExamples;
@@ -722,6 +734,10 @@ function IdeasDialog(props: { onClose: () => void; onChoose: (idea: { title: str
       [example.title, example.description, example.category, example.prompt].some(value => value.toLowerCase().includes(normalizedQuery))
     );
   }, [query]);
+  const visibleGalleryExamples = useMemo(() => {
+    if (activeCategory === 'All') return filteredExamples;
+    return filteredExamples.filter(example => example.category === activeCategory);
+  }, [activeCategory, filteredExamples]);
 
   useEffect(() => {
     function closeOnEscape(event: globalThis.KeyboardEvent) {
@@ -785,57 +801,23 @@ function IdeasDialog(props: { onClose: () => void; onChoose: (idea: { title: str
                   </button>
                 </div>
 
-                <div className="mt-8 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-                  <button
-                    type="button"
-                    onClick={() => onChoose({ title: featuredExample.title, prompt: featuredExample.prompt })}
-                    className="group min-h-64 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-6 text-left shadow-[var(--shadow-soft)] transition hover:border-[var(--border-strong)] hover:bg-[var(--surface-muted)]"
-                  >
-                    <div className="flex items-center justify-between gap-4">
-                      <span className="rounded-full bg-[var(--surface-muted)] px-3 py-1 text-sm text-[var(--text-muted)]">{featuredExample.category}</span>
-                      <span className="rounded-md bg-[var(--primary)] px-3 py-1.5 text-sm font-medium text-[var(--primary-contrast)] opacity-0 transition group-hover:opacity-100">
-                        Use example
-                      </span>
-                    </div>
-                    <div className="mt-16 max-w-xl">
-                      <h3 className="text-3xl font-semibold tracking-tight text-[var(--text-strong)]">{featuredExample.title}</h3>
-                      <p className="mt-3 text-base leading-7 text-pretty text-[var(--text-muted)]">{featuredExample.description}</p>
-                    </div>
-                  </button>
-
-                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
-                    {toolExamples.slice(1, 3).map(example => (
-                      <button
-                        key={`starter-${example.title}`}
-                        type="button"
-                        onClick={() => onChoose({ title: example.title, prompt: example.prompt })}
-                        className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-5 text-left transition hover:border-[var(--border-strong)] hover:bg-[var(--surface-muted)]"
-                      >
-                        <div className="text-sm text-[var(--text-faint)]">{example.category}</div>
-                        <div className="mt-7 text-lg font-semibold text-[var(--text-strong)]">{example.title}</div>
-                        <div className="mt-2 line-clamp-2 text-sm leading-6 text-[var(--text-muted)]">{example.description}</div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="mt-10 flex select-none items-center justify-between border-b border-[var(--border)] pb-3">
-                  <div className="text-lg font-medium text-[var(--text-strong)]">Popular templates</div>
-                  <div className="text-sm text-[var(--text-faint)]">Ready to adapt</div>
-                </div>
-
-                <div className="grid gap-3 py-6 sm:grid-cols-2 lg:grid-cols-3">
-                  {toolExamples.slice(3, 12).map(example => (
+                <div className="mt-8 grid gap-3 sm:grid-cols-3">
+                  {[featuredExample, ...toolExamples.slice(1, 3)].map(example => (
                     <button
-                      key={`popular-${example.category}-${example.title}`}
+                      key={`starter-${example.title}`}
                       type="button"
                       onClick={() => onChoose({ title: example.title, prompt: example.prompt })}
-                      className="group flex min-h-32 select-none flex-col rounded-lg border border-transparent px-3 py-3 text-left transition hover:border-[var(--border)] hover:bg-[var(--surface)]"
+                      className="group flex min-h-44 select-none flex-col rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 text-left transition hover:border-[var(--border-strong)] hover:bg-[var(--surface-muted)]"
                     >
-                      <span className="text-sm text-[var(--text-faint)]">{example.category}</span>
-                      <span className="mt-3 text-base font-medium text-[var(--text-strong)]">{example.title}</span>
+                      <span className="flex size-9 items-center justify-center rounded-md bg-[var(--surface-muted)] text-[var(--text-muted)]">
+                        <CategoryIcon category={example.category} />
+                      </span>
+                      <span className="mt-7 text-sm text-[var(--text-faint)]">{example.category}</span>
+                      <span className="mt-2 text-lg font-medium text-[var(--text-strong)]">{example.title}</span>
                       <span className="mt-2 line-clamp-2 text-sm leading-6 text-[var(--text-muted)]">{example.description}</span>
-                      <span className="mt-auto pt-4 text-sm font-medium text-[var(--text-faint)] transition group-hover:text-[var(--text-strong)]">Use example</span>
+                      <span className="mt-auto pt-4 text-sm font-medium text-[var(--text-faint)] transition group-hover:text-[var(--text-strong)]">
+                        Use example
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -866,18 +848,20 @@ function IdeasDialog(props: { onClose: () => void; onChoose: (idea: { title: str
                   </div>
                 </div>
 
-                <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="mt-8 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface)]">
                   {filteredExamples.map(example => (
                     <button
                       key={`${example.category}-${example.title}`}
                       type="button"
                       onClick={() => onChoose({ title: example.title, prompt: example.prompt })}
-                      className="group flex min-h-36 select-none flex-col rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 text-left transition hover:border-[var(--border-strong)] hover:bg-[var(--surface-muted)]"
+                      className="group grid w-full select-none grid-cols-[minmax(130px,0.22fr)_1fr_auto] items-center gap-4 border-t border-[var(--border)] px-5 py-3 text-left first:border-t-0 hover:bg-[var(--hover)]"
                     >
                       <span className="text-sm text-[var(--text-faint)]">{example.category}</span>
-                      <span className="mt-3 text-base font-medium text-[var(--text-strong)]">{example.title}</span>
-                      <span className="mt-2 line-clamp-2 text-sm leading-6 text-[var(--text-muted)]">{example.description}</span>
-                      <span className="mt-auto pt-4 text-sm font-medium text-[var(--text-faint)] transition group-hover:text-[var(--text-strong)]">Use example</span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-medium text-[var(--text-strong)]">{example.title}</span>
+                        <span className="mt-0.5 block truncate text-sm text-[var(--text-muted)]">{example.description}</span>
+                      </span>
+                      <span className="text-sm font-medium text-[var(--text-faint)] transition group-hover:text-[var(--text-strong)]">Use</span>
                     </button>
                   ))}
                 </div>

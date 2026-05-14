@@ -4,6 +4,6 @@
 
 *.log
 .env
-.DS_Store
+.amp
 .codex
 .agents
