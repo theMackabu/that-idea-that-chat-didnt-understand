@@ -46,9 +46,9 @@ type ToolExample = {
 };
 
 const suggestions = [
-  { label: 'Download videos', prompt: 'I want to download some videos' },
-  { label: 'Resize images', prompt: 'Make a small image resize tool' },
-  { label: 'Batch rename', prompt: 'Create a batch file renamer' }
+  { label: 'Download videos', title: 'Video Downloader', prompt: 'I want to download some videos' },
+  { label: 'Resize images', title: 'Image Resizer', prompt: 'Make a small image resize tool' },
+  { label: 'Batch rename', title: 'Batch Renamer', prompt: 'Create a batch file renamer' }
 ];
 
 const featuredExample: ToolExample = {
@@ -592,7 +592,7 @@ function Composer(props: {
             onKeyDown={event => submitOnCommandEnter(event, onSubmit)}
             rows={1}
             placeholder="Ask for a change or describe another tool"
-            className="max-h-24 min-h-10 w-full resize-none bg-transparent px-3 py-2 text-sm text-neutral-100 outline-none placeholder:text-neutral-500 max-sm:text-base"
+            className="max-h-24 min-h-10 w-full resize-none bg-transparent px-3 py-2 text-[15px] leading-6 text-neutral-100 outline-none placeholder:text-neutral-500"
           />
           <div className="flex items-center justify-between gap-3 border-t border-white/8 px-2 pt-2">
             <div className="flex items-center gap-2 text-sm text-neutral-500">
@@ -648,21 +648,22 @@ function InitialTaskDraft(props: {
   const { title, setTitle, prompt, setPrompt, onSubmit } = props;
   const [showMoreIdeas, setShowMoreIdeas] = useState(false);
 
-  function chooseIdea(idea: string) {
-    setPrompt(idea);
+  function chooseIdea(idea: { title: string; prompt: string }) {
+    setTitle(idea.title);
+    setPrompt(idea.prompt);
     setShowMoreIdeas(false);
   }
 
   return (
     <div className="flex flex-1 flex-col pt-4">
-      <div className="w-full max-w-2xl">
+      <div className="flex min-h-0 w-full max-w-2xl flex-1 flex-col">
         <input
           id="task-title"
           name="task-title"
           aria-label="Task title"
           value={title}
           onChange={event => setTitle(event.target.value)}
-          className="block w-full bg-transparent p-0 text-[40px] font-semibold leading-none tracking-tight text-neutral-100 outline-none placeholder:text-neutral-600"
+          className="block h-8 w-full bg-transparent p-0 text-[25px] font-semibold leading-8 tracking-tight text-neutral-100 outline-none placeholder:text-neutral-600"
           placeholder="Untitled task"
         />
         <textarea
@@ -672,18 +673,20 @@ function InitialTaskDraft(props: {
           value={prompt}
           onChange={event => setPrompt(event.target.value)}
           onKeyDown={event => submitOnCommandEnter(event, onSubmit)}
-          rows={4}
-          placeholder="Describe the tool you want to make"
-          className="mt-5 min-h-24 w-full resize-none bg-transparent text-xl text-neutral-100 outline-none placeholder:text-neutral-500 max-sm:text-base"
+          rows={1}
+          placeholder="What do you want to run?"
+          className="mt-5 min-h-0 flex-1 resize-none bg-transparent text-[15px] leading-6 text-neutral-100 outline-none placeholder:text-neutral-500"
         />
+      </div>
 
-        <div className="-mt-8 flex select-none flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+      <div className="mt-auto flex justify-center pb-3">
+        <div className="flex select-none flex-wrap items-center justify-center gap-x-4 gap-y-2 text-sm">
           <span className="text-neutral-700">Try</span>
           {suggestions.map(suggestion => (
             <button
               key={suggestion.label}
               type="button"
-              onClick={() => chooseIdea(suggestion.prompt)}
+              onClick={() => chooseIdea(suggestion)}
               className="app-no-drag text-neutral-500 transition hover:text-neutral-200"
             >
               {suggestion.label}
@@ -704,7 +707,7 @@ function InitialTaskDraft(props: {
   );
 }
 
-function IdeasDialog(props: { onClose: () => void; onChoose: (idea: string) => void }) {
+function IdeasDialog(props: { onClose: () => void; onChoose: (idea: { title: string; prompt: string }) => void }) {
   const { onClose, onChoose } = props;
   const [query, setQuery] = useState('');
   const filteredExamples = useMemo(() => {
@@ -772,7 +775,7 @@ function IdeasDialog(props: { onClose: () => void; onChoose: (idea: string) => v
                 <p className="mt-4 max-w-xl text-lg text-neutral-200">{featuredExample.description}</p>
                 <button
                   type="button"
-                  onClick={() => onChoose(featuredExample.prompt)}
+                  onClick={() => onChoose({ title: featuredExample.title, prompt: featuredExample.prompt })}
                   className="mt-7 rounded-lg bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-950 hover:bg-white"
                 >
                   Try in task
@@ -790,7 +793,7 @@ function IdeasDialog(props: { onClose: () => void; onChoose: (idea: string) => v
                 <button
                   key={`${example.category}-${example.title}`}
                   type="button"
-                  onClick={() => onChoose(example.prompt)}
+                  onClick={() => onChoose({ title: example.title, prompt: example.prompt })}
                   className="grid select-none grid-cols-[44px_1fr_auto] items-center gap-4 rounded-xl px-3 py-3 text-left hover:bg-white/[0.04]"
                 >
                   <span className="flex size-11 items-center justify-center rounded-xl bg-white/[0.06] text-sm font-medium text-neutral-200 ring-1 ring-white/10">
