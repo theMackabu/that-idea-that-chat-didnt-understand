@@ -238,12 +238,23 @@ function buildCommand(request: ToolRunRequest): {
   if (request.tool === "shell.run") {
     const command = renderCommandTemplate(request.command || "", request.values).trim();
     if (!command) throw new Error("No command was generated.");
+    const argv = splitCommandLine(command);
+
+    if (argv.length > 0 && !needsShell(command)) {
+      return {
+        file: argv[0],
+        args: argv.slice(1),
+        cwd: app.getPath("home"),
+        shell: false,
+        command
+      };
+    }
 
     return {
-      file: command,
-      args: [],
+      file: "/bin/zsh",
+      args: ["-f", "-c", "unsetopt nomatch; eval -- \"$1\"", "uiterm-shell", command],
       cwd: app.getPath("home"),
-      shell: true,
+      shell: false,
       command
     };
   }
@@ -286,6 +297,80 @@ function buildYtDlpArgs(values: ToolRunRequest["values"]): { args: string[]; out
 function shellQuote(value: string): string {
   if (/^[A-Za-z0-9_./:=@%+-]+$/.test(value)) return value;
   return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function splitCommandLine(command: string): string[] {
+  const args: string[] = [];
+  let current = "";
+  let quote: "'" | '"' | null = null;
+  let escaping = false;
+
+  for (const char of command) {
+    if (escaping) {
+      current += char;
+      escaping = false;
+      continue;
+    }
+
+    if (char === "\\" && quote !== "'") {
+      escaping = true;
+      continue;
+    }
+
+    if ((char === "'" || char === '"') && !quote) {
+      quote = char;
+      continue;
+    }
+
+    if (char === quote) {
+      quote = null;
+      continue;
+    }
+
+    if (/\s/.test(char) && !quote) {
+      if (current) {
+        args.push(current);
+        current = "";
+      }
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current) args.push(current);
+  return args;
+}
+
+function needsShell(command: string): boolean {
+  let quote: "'" | '"' | null = null;
+  let escaping = false;
+
+  for (const char of command) {
+    if (escaping) {
+      escaping = false;
+      continue;
+    }
+
+    if (char === "\\" && quote !== "'") {
+      escaping = true;
+      continue;
+    }
+
+    if ((char === "'" || char === '"') && !quote) {
+      quote = char;
+      continue;
+    }
+
+    if (char === quote) {
+      quote = null;
+      continue;
+    }
+
+    if (!quote && "|&;<>$`(){}*?[]!~".includes(char)) return true;
+  }
+
+  return false;
 }
 
 function renderCommandTemplate(template: string, values: ToolRunRequest["values"]): string {
