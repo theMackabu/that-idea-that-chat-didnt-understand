@@ -297,19 +297,8 @@ export function App() {
 
   const commandPreview = useMemo(() => {
     if (!ui) return 'No executable command';
-
-    if (ui.tool === 'shell.run') {
-      return renderCommandTemplate(ui.command || ui.previewCommand || '', values) || 'No command generated';
-    }
-
-    if (ui.tool !== 'yt-dlp.download') return ui.previewCommand ?? 'No executable command';
-
-    const urls = String(values.urls || '<urls>')
-      .split(/\r?\n/)
-      .filter(Boolean).length;
-    const quality = String(values.quality || 'best');
-    const outputDir = String(values.outputDir || '<output folder>');
-    return `yt-dlp -P ${quotePreview(outputDir)} -f ${quality} ${urls > 1 ? `${urls} urls` : '<url>'}`;
+    if (ui.tool !== 'shell.run') return ui.previewCommand ?? 'No executable command';
+    return renderCommandTemplate(ui.command || ui.previewCommand || '', values) || 'No command generated';
   }, [ui, values]);
 
   async function compose(event?: FormEvent) {
@@ -368,8 +357,23 @@ export function App() {
     if (!ui || ui.action.tool === 'noop' || running) return;
     setRunning(true);
     setStatus('Starting');
-    const result = await window.uiterm.runAction({ tool: ui.action.tool, values, command: ui.command || ui.previewCommand });
-    setRunId(result.runId);
+    try {
+      const result = await window.uiterm.runAction({ tool: ui.action.tool, values, command: ui.command || ui.previewCommand });
+      setRunId(result.runId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setRunning(false);
+      setRunId(null);
+      setStatus('Failed');
+      setLogs(current => [
+        ...current,
+        {
+          id: crypto.randomUUID(),
+          stream: 'stderr',
+          text: `${message}\n`
+        }
+      ]);
+    }
   }
 
   async function cancelRun() {

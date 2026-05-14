@@ -81,7 +81,7 @@ ipcMain.handle('ai:compose-ui', async (_event, userPrompt: string): Promise<Gene
         'Use blocks for generated non-input UI: box for notes/status panels, image for image previews, metric for single values, and barChart for simple graphs.',
         'When a request benefits from richer UI, include blocks before fields, such as metrics for counts, bar charts for comparisons, boxes for warnings/instructions, and image blocks for preview URLs or generated file outputs.',
         'The app shell-quotes placeholder values before execution, so do not wrap placeholders in quotes.',
-        'For video download requests you may use yt-dlp.download, but shell.run is valid for everything else including ssh, git, ffmpeg, python, npm, docker, rsync, find, grep, tar, zip, database CLIs, network diagnostics, and system tools.',
+        'Use shell.run for executable tasks, including video downloads, ssh, git, ffmpeg, python, npm, docker, rsync, find, grep, tar, zip, database CLIs, network diagnostics, and system tools.',
         'When useful, generate multiple fields so the user can safely adjust hostnames, folders, flags, formats, services, ports, and filters before running.'
       ].join(' '),
       prompt: `User request: ${userPrompt}`
@@ -151,71 +151,23 @@ ipcMain.handle('tool:cancel', async (_event, runId: string) => {
 });
 
 function createFallbackUi(userPrompt: string): GeneratedUi {
-  const lower = userPrompt.toLowerCase();
-  const looksLikeVideoDownload = lower.includes('download') || lower.includes('video') || lower.includes('youtube') || lower.includes('yt-dlp');
-
-  if (!looksLikeVideoDownload) {
-    return {
-      title: 'Local Command',
-      summary: 'A generic command runner for this task. Edit the command before running it.',
-      tool: 'shell.run',
-      fields: [
-        {
-          name: 'command',
-          label: 'Command',
-          type: 'textarea',
-          defaultValue: userPrompt,
-          description: 'Runs locally in your home folder.'
-        }
-      ],
-      action: { label: 'Run command', tool: 'shell.run' },
-      command: '{{command}}',
-      previewCommand: '{{command}}',
-      safety: ['Command is shown before execution.', 'Runs are cancellable.']
-    };
-  }
-
   return {
-    title: 'Video Downloader',
-    summary: 'A focused yt-dlp wrapper generated from your chat request.',
-    tool: 'yt-dlp.download',
+    title: 'Local Command',
+    summary: 'A generic command runner for this task. Edit the command before running it.',
+    tool: 'shell.run',
     fields: [
       {
-        name: 'urls',
-        label: 'Video URLs',
+        name: 'command',
+        label: 'Command',
         type: 'textarea',
-        placeholder: 'https://www.youtube.com/watch?v=...',
-        required: true,
-        description: 'One URL per line.'
-      },
-      {
-        name: 'quality',
-        label: 'Quality',
-        type: 'select',
-        defaultValue: 'best',
-        options: [
-          { label: 'Best available', value: 'best' },
-          { label: '1080p cap', value: '1080p' },
-          { label: '720p cap', value: '720p' },
-          { label: 'Audio only MP3', value: 'audio' }
-        ]
-      },
-      {
-        name: 'outputDir',
-        label: 'Output folder',
-        type: 'folder',
-        defaultValue: app.getPath('downloads')
-      },
-      {
-        name: 'subtitles',
-        label: 'Write auto subtitles',
-        type: 'checkbox',
-        defaultValue: false
+        defaultValue: userPrompt,
+        description: 'Runs locally in your home folder.'
       }
     ],
-    action: { label: 'Download', tool: 'yt-dlp.download' },
-    previewCommand: 'yt-dlp -P <output folder> -f <quality> <urls>',
-    safety: ['Command arguments are assembled by the app, not by generated shell text.', 'Runs are cancellable.']
+    action: { label: 'Run command', tool: 'shell.run' },
+    command: '{{command}}',
+    previewCommand: '{{command}}',
+    safety: ['Command is shown before execution.', 'Runs are cancellable.']
   };
 }
 
@@ -226,17 +178,6 @@ function buildCommand(request: ToolRunRequest): {
   shell: boolean;
   command: string;
 } {
-  if (request.tool === 'yt-dlp.download') {
-    const { args, outputDir } = buildYtDlpArgs(request.values);
-    return {
-      file: 'yt-dlp',
-      args,
-      cwd: outputDir,
-      shell: false,
-      command: `yt-dlp ${args.map(shellQuote).join(' ')}`
-    };
-  }
-
   if (request.tool === 'shell.run') {
     const command = renderCommandTemplate(request.command || '', request.values).trim();
     if (!command) throw new Error('No command was generated.');
@@ -262,38 +203,6 @@ function buildCommand(request: ToolRunRequest): {
   }
 
   throw new Error('No executable tool was generated for this task.');
-}
-
-function buildYtDlpArgs(values: ToolRunRequest['values']): { args: string[]; outputDir: string } {
-  const urls = String(values.urls || '')
-    .split(/\r?\n/)
-    .map(url => url.trim())
-    .filter(Boolean);
-
-  if (urls.length === 0) {
-    throw new Error('Add at least one video URL.');
-  }
-
-  const outputDir = String(values.outputDir || app.getPath('downloads'));
-  const quality = String(values.quality || 'best');
-  const args = ['--newline', '-P', outputDir, '-o', '%(title).200B [%(id)s].%(ext)s'];
-
-  if (quality === 'audio') {
-    args.push('-x', '--audio-format', 'mp3');
-  } else if (quality === '1080p') {
-    args.push('-f', 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best');
-  } else if (quality === '720p') {
-    args.push('-f', 'bestvideo[height<=720]+bestaudio/best[height<=720]/best');
-  } else {
-    args.push('-f', 'bestvideo*+bestaudio/best');
-  }
-
-  if (values.subtitles === true) {
-    args.push('--write-auto-subs', '--sub-langs', 'all');
-  }
-
-  args.push(...urls);
-  return { args, outputDir };
 }
 
 function shellQuote(value: string): string {

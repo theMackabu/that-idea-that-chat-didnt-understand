@@ -28,12 +28,12 @@ export const generatedBlockSchema = z.object({
 export const generatedUiSchema = z.object({
   title: z.string().min(1),
   summary: z.string().min(1),
-  tool: z.enum(["shell.run", "yt-dlp.download", "noop"]),
+  tool: z.enum(["shell.run", "noop"]),
   blocks: z.array(generatedBlockSchema).max(12).optional(),
   fields: z.array(fieldSchema).max(12),
   action: z.object({
     label: z.string().min(1),
-    tool: z.enum(["shell.run", "yt-dlp.download", "noop"])
+    tool: z.enum(["shell.run", "noop"])
   }),
   safety: z.array(z.string()).default([]),
   command: z.string().optional(),
