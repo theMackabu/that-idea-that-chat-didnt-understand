@@ -46,12 +46,9 @@ type ToolExample = {
 };
 
 const suggestions = [
-  'I want to download some videos',
-  'Make a small image resize tool',
-  'Create a batch file renamer',
-  'Pull audio from a video',
-  'SSH into a server',
-  'Find large files'
+  { label: 'Download videos', prompt: 'I want to download some videos' },
+  { label: 'Resize images', prompt: 'Make a small image resize tool' },
+  { label: 'Batch rename', prompt: 'Create a batch file renamer' }
 ];
 
 const featuredExample: ToolExample = {
@@ -677,26 +674,25 @@ function InitialTaskDraft(props: {
           onKeyDown={event => submitOnCommandEnter(event, onSubmit)}
           rows={4}
           placeholder="Describe the tool you want to make"
-          className="mt-5 min-h-36 w-full resize-none bg-transparent text-xl text-neutral-100 outline-none placeholder:text-neutral-500 max-sm:text-base"
+          className="mt-5 min-h-24 w-full resize-none bg-transparent text-xl text-neutral-100 outline-none placeholder:text-neutral-500 max-sm:text-base"
         />
-      </div>
 
-      <div className="mt-auto flex justify-center pb-2">
-        <div className="flex max-w-3xl flex-wrap justify-center gap-2">
+        <div className="-mt-8 flex select-none flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+          <span className="text-neutral-700">Try</span>
           {suggestions.map(suggestion => (
             <button
-              key={suggestion}
+              key={suggestion.label}
               type="button"
-              onClick={() => chooseIdea(suggestion)}
-              className="app-no-drag select-none rounded-full bg-white/[0.04] px-3 py-1.5 text-sm text-neutral-400 ring-1 ring-white/10 transition hover:bg-white/[0.07] hover:text-neutral-200"
+              onClick={() => chooseIdea(suggestion.prompt)}
+              className="app-no-drag text-neutral-500 transition hover:text-neutral-200"
             >
-              {suggestion}
+              {suggestion.label}
             </button>
           ))}
           <button
             type="button"
             onClick={() => setShowMoreIdeas(true)}
-            className="app-no-drag select-none rounded-full bg-white/[0.04] px-3 py-1.5 text-sm text-neutral-300 ring-1 ring-white/10 transition hover:bg-white/[0.07] hover:text-neutral-100"
+            className="app-no-drag rounded-md bg-white/[0.035] px-2 py-1 text-neutral-400 transition hover:bg-white/[0.06] hover:text-neutral-100"
           >
             More
           </button>
@@ -719,6 +715,15 @@ function IdeasDialog(props: { onClose: () => void; onChoose: (idea: string) => v
       [example.title, example.description, example.category, example.prompt].some(value => value.toLowerCase().includes(normalizedQuery))
     );
   }, [query]);
+
+  useEffect(() => {
+    function closeOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === 'Escape') onClose();
+    }
+
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [onClose]);
 
   return (
     <div className="fixed inset-0 z-20 bg-[#0d0d0e]">
