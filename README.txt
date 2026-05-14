@@ -1,0 +1,1 @@
+copy .env.example to .env and drop in your OPENAI_API_KEY=""

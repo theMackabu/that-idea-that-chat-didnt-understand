@@ -14,7 +14,7 @@ import {
   TerminalSquare,
   WandSparkles
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useMemo, useState } from "react";
 import type { GeneratedField, GeneratedUi, ToolOutputEvent } from "../../shared/schema";
 import { TerminalEntry, TerminalPane } from "./components/TerminalPane";
 import { cn } from "./lib/utils";
@@ -34,6 +34,7 @@ const suggestions = [
 
 export function App() {
   const [prompt, setPrompt] = useState("");
+  const [taskTitle, setTaskTitle] = useState("Untitled task");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [ui, setUi] = useState<GeneratedUi | null>(null);
   const [values, setValues] = useState<Record<string, string | boolean | undefined>>({});
@@ -63,7 +64,14 @@ export function App() {
   }, []);
 
   const commandPreview = useMemo(() => {
-    if (!ui || ui.tool !== "yt-dlp.download") return ui?.previewCommand ?? "No executable command";
+    if (!ui) return "No executable command";
+
+    if (ui.tool === "shell.run") {
+      return renderCommandTemplate(ui.command || ui.previewCommand || "", values) || "No command generated";
+    }
+
+    if (ui.tool !== "yt-dlp.download") return ui.previewCommand ?? "No executable command";
+
     const urls = String(values.urls || "<urls>").split(/\r?\n/).filter(Boolean).length;
     const quality = String(values.quality || "best");
     const outputDir = String(values.outputDir || "<output folder>");
@@ -87,6 +95,7 @@ export function App() {
     try {
       const nextUi = await window.uiterm.composeUi(userText);
       setUi(nextUi);
+      setTaskTitle(nextUi.title);
       setValues(inferDefaults(nextUi.fields));
       setLogs([]);
       setStatus("Ready");
@@ -107,7 +116,7 @@ export function App() {
     if (!ui || ui.action.tool === "noop" || running) return;
     setRunning(true);
     setStatus("Starting");
-    const result = await window.uiterm.runAction({ tool: ui.action.tool, values });
+    const result = await window.uiterm.runAction({ tool: ui.action.tool, values, command: ui.command || ui.previewCommand });
     setRunId(result.runId);
   }
 
@@ -119,6 +128,7 @@ export function App() {
 
   function startNewTask() {
     setPrompt("");
+    setTaskTitle("Untitled task");
     setMessages([]);
     setUi(null);
     setValues({});
@@ -131,12 +141,12 @@ export function App() {
 
   return (
     <main className="scheme-only-dark flex h-screen flex-col bg-[#0a0a0b] text-neutral-100">
-      <header className="app-drag flex h-12 shrink-0 items-center justify-between border-b border-white/8 bg-[#101012] pr-4 pl-24">
+      <header className="app-drag flex h-12 shrink-0 select-none items-center justify-between border-b border-white/8 bg-[#101012] pr-4 pl-24">
         <div className="flex items-center gap-3 text-sm text-neutral-400">
           <TerminalSquare size={17} className="text-neutral-500" />
           <span>UITerm</span>
           <span className="text-neutral-700">/</span>
-          <span className="font-medium text-neutral-200">Untitled task</span>
+          <span className="font-medium text-neutral-200">{taskTitle}</span>
         </div>
         <div className="app-no-drag flex items-center gap-2">
           <div className="flex items-center gap-2 px-2 text-sm text-neutral-500">
@@ -149,7 +159,7 @@ export function App() {
           </div>
           <button
             type="button"
-            className="flex size-8 items-center justify-center rounded-md text-neutral-500 transition hover:bg-white/[0.04] hover:text-neutral-300"
+            className="flex size-8 select-none items-center justify-center rounded-md text-neutral-500 transition hover:bg-white/[0.04] hover:text-neutral-300"
             title="Toggle details"
           >
             <PanelRight size={17} />
@@ -179,7 +189,7 @@ export function App() {
             ) : composing ? (
               <GeneratingUi messages={[...messages, { id: "pending", role: "user", content: prompt || "Generating interface..." }]} />
             ) : (
-              <InitialTaskDraft prompt={prompt} setPrompt={setPrompt} />
+              <InitialTaskDraft title={taskTitle} prompt={prompt} setPrompt={setPrompt} onSubmit={compose} />
             )}
           </div>
         </div>
@@ -199,7 +209,7 @@ function TaskTranscript({ messages }: { messages: ChatMessage[] }) {
     <div className="space-y-3">
       {messages.map((message) => (
         <div key={message.id} className="group flex gap-3">
-          <div className="mt-1 flex size-6 shrink-0 items-center justify-center rounded-md bg-white/5 text-neutral-400 ring-1 ring-white/8">
+          <div className="mt-1 flex size-6 shrink-0 select-none items-center justify-center rounded-md bg-white/5 text-neutral-400 ring-1 ring-white/8">
             {message.role === "user" ? <WandSparkles size={14} /> : <TerminalSquare size={14} />}
           </div>
           <div>
@@ -218,7 +228,7 @@ function GeneratingUi({ messages }: { messages: ChatMessage[] }) {
       <TaskTranscript messages={messages.filter((message) => message.id !== "pending" || message.content !== "Generating interface...")} />
 
       <div className="space-y-6">
-        <div className="flex items-center gap-2 text-sm font-medium text-neutral-400">
+        <div className="flex select-none items-center gap-2 text-sm font-medium text-neutral-400">
           <span className="relative flex size-3">
             <span className="absolute inline-flex size-full animate-ping rounded-full bg-[#6aa4ff] opacity-35" />
             <span className="relative inline-flex size-3 rounded-full bg-[#6aa4ff]" />
@@ -279,6 +289,7 @@ function Composer(props: {
             aria-label="Task"
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
+            onKeyDown={(event) => submitOnCommandEnter(event, onSubmit)}
             rows={1}
             placeholder="Ask for a change or describe another tool"
             className="max-h-24 min-h-10 w-full resize-none bg-transparent px-3 py-2 text-sm text-neutral-100 outline-none placeholder:text-neutral-500 max-sm:text-base"
@@ -288,7 +299,7 @@ function Composer(props: {
               <button
                 type="button"
                 onClick={onNewTask}
-                className="flex items-center gap-1.5 rounded-md px-2 py-1 transition hover:bg-white/5 hover:text-neutral-300"
+                className="flex select-none items-center gap-1.5 rounded-md px-2 py-1 transition hover:bg-white/5 hover:text-neutral-300"
               >
                 <RotateCcw size={14} />
                 New task
@@ -298,20 +309,28 @@ function Composer(props: {
                 type="button"
                 onClick={() => setPrompt("")}
                 disabled={!prompt}
-                className="flex items-center gap-1.5 rounded-md px-2 py-1 transition hover:bg-white/5 hover:text-neutral-300 disabled:text-neutral-700 disabled:hover:bg-transparent"
+                className="flex select-none items-center gap-1.5 rounded-md px-2 py-1 transition hover:bg-white/5 hover:text-neutral-300 disabled:text-neutral-700 disabled:hover:bg-transparent"
               >
                 <Eraser size={14} />
                 Clear
               </button>
             </div>
-            <button
-              type="submit"
-              disabled={!prompt.trim() || composing}
-              className="flex size-8 items-center justify-center rounded-lg bg-neutral-100 text-neutral-950 transition hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-400 disabled:bg-white/10 disabled:text-neutral-600"
-              title="Send"
-            >
-              {composing ? <Loader2 className="animate-spin" size={16} /> : <ArrowUp size={16} />}
-            </button>
+              <button
+                type="submit"
+                disabled={!prompt.trim() || composing}
+                className="flex h-8 select-none items-center justify-center gap-2 rounded-lg bg-neutral-100 px-2.5 text-sm font-medium text-neutral-950 transition hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-400 disabled:bg-white/10 disabled:text-neutral-600"
+                title="Send with Cmd+Enter"
+              >
+                {composing ? (
+                  <Loader2 className="animate-spin" size={15} />
+                ) : (
+                  <>
+                    <span>Send</span>
+                    <span className="text-neutral-500">⌘↵</span>
+                    <ArrowUp size={15} />
+                  </>
+                )}
+              </button>
           </div>
         </form>
       </div>
@@ -319,19 +338,25 @@ function Composer(props: {
   );
 }
 
-function InitialTaskDraft(props: { prompt: string; setPrompt: (prompt: string) => void }) {
-  const { prompt, setPrompt } = props;
+function InitialTaskDraft(props: {
+  title: string;
+  prompt: string;
+  setPrompt: (prompt: string) => void;
+  onSubmit: (event?: FormEvent) => void;
+}) {
+  const { title, prompt, setPrompt, onSubmit } = props;
 
   return (
     <div className="flex flex-1 flex-col pt-4">
       <div className="w-full max-w-2xl">
-        <h1 className="text-2xl font-semibold tracking-tight text-balance text-neutral-100">Untitled task</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-balance text-neutral-100">{title}</h1>
         <textarea
           id="initial-intent"
           name="initial-intent"
           aria-label="Task"
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
+          onKeyDown={(event) => submitOnCommandEnter(event, onSubmit)}
           rows={4}
           placeholder="Describe the tool you want to make"
           className="mt-5 min-h-36 w-full resize-none bg-transparent text-xl text-neutral-100 outline-none placeholder:text-neutral-500 max-sm:text-base"
@@ -345,7 +370,7 @@ function InitialTaskDraft(props: { prompt: string; setPrompt: (prompt: string) =
               key={suggestion}
               type="button"
               onClick={() => setPrompt(suggestion)}
-              className="app-no-drag rounded-full bg-white/[0.04] px-3 py-1.5 text-sm text-neutral-400 ring-1 ring-white/10 transition hover:bg-white/[0.07] hover:text-neutral-200"
+              className="app-no-drag select-none rounded-full bg-white/[0.04] px-3 py-1.5 text-sm text-neutral-400 ring-1 ring-white/10 transition hover:bg-white/[0.07] hover:text-neutral-200"
             >
               {suggestion}
             </button>
@@ -367,14 +392,14 @@ function InitialCommandBar(props: {
 
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-0 z-10 bg-gradient-to-t from-[#0a0a0b] via-[#0a0a0b] to-transparent px-6 pb-7 pt-14">
-      <div className="pointer-events-auto mx-auto flex h-12 w-fit items-center gap-3 rounded-xl bg-[#202124] px-3 text-sm text-neutral-500 ring-1 ring-white/10">
+      <div className="pointer-events-auto mx-auto flex h-12 w-fit select-none items-center gap-3 rounded-xl bg-[#202124] px-3 text-sm text-neutral-500 ring-1 ring-white/10">
         <span className="px-2 text-neutral-400">Tool draft</span>
         <span className="h-5 w-px bg-white/10" />
         <button
           type="button"
           onClick={() => setPrompt("")}
           disabled={!prompt}
-          className="app-no-drag flex items-center gap-1.5 rounded-md px-2 py-1 transition hover:bg-white/5 hover:text-neutral-300 disabled:text-neutral-700 disabled:hover:bg-transparent"
+          className="app-no-drag flex select-none items-center gap-1.5 rounded-md px-2 py-1 transition hover:bg-white/5 hover:text-neutral-300 disabled:text-neutral-700 disabled:hover:bg-transparent"
         >
           <Eraser size={14} />
           Clear
@@ -384,14 +409,27 @@ function InitialCommandBar(props: {
           type="button"
           onClick={() => onSubmit()}
           disabled={!canSubmit || composing}
-          className="app-no-drag flex items-center gap-2 rounded-md px-2 py-1 font-medium text-neutral-400 transition hover:bg-white/5 hover:text-neutral-200 disabled:text-neutral-600 disabled:hover:bg-transparent"
+          className="app-no-drag flex select-none items-center gap-2 rounded-md px-2 py-1 font-medium text-neutral-400 transition hover:bg-white/5 hover:text-neutral-200 disabled:text-neutral-600 disabled:hover:bg-transparent"
         >
-          {composing ? <Loader2 className="animate-spin" size={16} /> : "Send"}
-          {!composing ? <ArrowUp size={15} /> : null}
+          {composing ? (
+            <Loader2 className="animate-spin" size={16} />
+          ) : (
+            <>
+              <span>Send</span>
+              <span className="text-neutral-600">⌘↵</span>
+              <ArrowUp size={15} />
+            </>
+          )}
         </button>
       </div>
     </div>
   );
+}
+
+function submitOnCommandEnter(event: KeyboardEvent<HTMLTextAreaElement>, onSubmit: (event?: FormEvent) => void) {
+  if (event.key !== "Enter" || (!event.metaKey && !event.ctrlKey)) return;
+  event.preventDefault();
+  onSubmit();
 }
 
 function ToolForm(props: {
@@ -415,7 +453,7 @@ function ToolForm(props: {
   return (
     <div className="space-y-6">
       <div>
-        <div className="flex items-center gap-2 text-sm font-medium text-neutral-400">
+        <div className="flex select-none items-center gap-2 text-sm font-medium text-neutral-400">
           <WandSparkles size={15} />
           Generated interface
         </div>
@@ -424,14 +462,16 @@ function ToolForm(props: {
         {ui.aiNote ? <p className="mt-3 rounded-lg bg-amber-400/10 px-3 py-2 text-sm leading-6 text-amber-200 ring-1 ring-amber-300/20">{ui.aiNote}</p> : null}
       </div>
 
-      <div className="space-y-4 rounded-xl bg-[#18191b] p-5 ring-1 ring-white/8">
-        {ui.fields.map((field) => (
-          <FieldRenderer key={field.name} field={field} value={values[field.name]} onChange={(value) => setValue(field.name, value)} />
-        ))}
-      </div>
+      {ui.fields.length > 0 ? (
+        <div className="space-y-4 rounded-xl bg-[#18191b] p-5 ring-1 ring-white/8">
+          {ui.fields.map((field) => (
+            <FieldRenderer key={field.name} field={field} value={values[field.name]} onChange={(value) => setValue(field.name, value)} />
+          ))}
+        </div>
+      ) : null}
 
       <div className="rounded-xl bg-white/[0.035] p-3 ring-1 ring-white/8">
-        <div className="mb-2 text-sm font-medium text-neutral-400">Command preview</div>
+        <div className="mb-2 select-none text-sm font-medium text-neutral-400">Command preview</div>
         <code className="block break-words font-mono text-sm leading-6 text-neutral-300">{commandPreview}</code>
       </div>
 
@@ -439,7 +479,7 @@ function ToolForm(props: {
         <div className="space-y-2">
           {ui.safety.map((item) => (
             <div key={item} className="flex gap-2 text-sm leading-6 text-neutral-500">
-              <ShieldCheck size={15} className="mt-1 shrink-0 text-emerald-400" />
+              <ShieldCheck size={15} className="mt-1 shrink-0 select-none text-emerald-400" />
               {item}
             </div>
           ))}
@@ -451,7 +491,7 @@ function ToolForm(props: {
           type="button"
           onClick={onRun}
           disabled={ui.action.tool === "noop" || running}
-          className="flex h-9 flex-1 items-center justify-center gap-2 rounded-lg bg-neutral-100 px-3 text-sm font-medium text-neutral-950 transition hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-400 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex h-9 flex-1 select-none items-center justify-center gap-2 rounded-lg bg-neutral-100 px-3 text-sm font-medium text-neutral-950 transition hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-400 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {running ? <Loader2 className="animate-spin" size={16} /> : <Play size={16} />}
           {ui.action.label}
@@ -460,7 +500,7 @@ function ToolForm(props: {
           type="button"
           onClick={onCancel}
           disabled={!running}
-          className="flex h-9 items-center justify-center gap-2 rounded-lg bg-white/[0.04] px-3 text-sm font-medium text-neutral-300 ring-1 ring-white/10 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex h-9 select-none items-center justify-center gap-2 rounded-lg bg-white/[0.04] px-3 text-sm font-medium text-neutral-300 ring-1 ring-white/10 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Square size={15} />
           Stop
@@ -471,7 +511,7 @@ function ToolForm(props: {
         <button
           type="button"
           onClick={onToggleOutput}
-          className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-medium text-neutral-300 transition hover:bg-white/[0.03]"
+          className="flex w-full select-none items-center justify-between gap-3 px-4 py-3 text-left text-sm font-medium text-neutral-300 transition hover:bg-white/[0.03]"
         >
           <span className="flex items-center gap-2">
             <Terminal size={16} />
@@ -581,7 +621,7 @@ function FieldRenderer(props: {
               const folder = await window.uiterm.selectFolder();
               if (folder) onChange(folder);
             }}
-            className="flex h-10 w-11 items-center justify-center rounded-lg bg-white/[0.04] text-neutral-300 ring-1 ring-white/10 transition hover:bg-white/[0.07]"
+            className="flex h-10 w-11 select-none items-center justify-center rounded-lg bg-white/[0.04] text-neutral-300 ring-1 ring-white/10 transition hover:bg-white/[0.07]"
             title="Choose folder"
           >
             <FolderOpen size={16} />
@@ -613,4 +653,12 @@ function toTerminalEntry(event: ToolOutputEvent): TerminalEntry {
 
 function quotePreview(value: string) {
   return /\s/.test(value) ? `"${value}"` : value;
+}
+
+function renderCommandTemplate(template: string, values: Record<string, string | boolean | undefined>) {
+  return template.replace(/\{\{([A-Za-z0-9_]+)\}\}/g, (_match, key: string) => {
+    const value = values[key];
+    if (typeof value === "boolean") return value ? "true" : "false";
+    return quotePreview(String(value ?? ""));
+  });
 }

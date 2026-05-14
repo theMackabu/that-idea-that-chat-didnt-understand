@@ -14,13 +14,14 @@ export const fieldSchema = z.object({
 export const generatedUiSchema = z.object({
   title: z.string().min(1),
   summary: z.string().min(1),
-  tool: z.enum(["yt-dlp.download", "noop"]),
-  fields: z.array(fieldSchema).min(1).max(12),
+  tool: z.enum(["shell.run", "yt-dlp.download", "noop"]),
+  fields: z.array(fieldSchema).max(12),
   action: z.object({
     label: z.string().min(1),
-    tool: z.enum(["yt-dlp.download", "noop"])
+    tool: z.enum(["shell.run", "yt-dlp.download", "noop"])
   }),
   safety: z.array(z.string()).default([]),
+  command: z.string().optional(),
   previewCommand: z.string().optional(),
   aiNote: z.string().optional()
 });
@@ -31,6 +32,7 @@ export type GeneratedUi = z.infer<typeof generatedUiSchema>;
 export type ToolRunRequest = {
   tool: GeneratedUi["tool"];
   values: Record<string, string | boolean | undefined>;
+  command?: string;
 };
 
 export type ToolOutputEvent =

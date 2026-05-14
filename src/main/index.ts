@@ -68,10 +68,12 @@ ipcMain.handle("ai:compose-ui", async (_event, userPrompt: string): Promise<Gene
       schema: generatedUiSchema,
       system: [
         "You create schema-driven utility UIs for a local Electron app called UITerm.",
-        "Only choose tools from this registry: yt-dlp.download for video downloads, noop for unsupported tasks.",
-        "Never invent shell commands, HTML, JavaScript, CSS, package names, or executable code.",
-        "Prefer compact, practical fields that map to safe command arguments.",
-        "For video download requests, produce a yt-dlp UI with URL textarea, quality select, output folder, and subtitle/audio toggles if useful."
+        "Create a compact UI for any local command-line task the user asks for.",
+        "Use tool shell.run for executable tasks. Use noop only when there is genuinely nothing local to run.",
+        "For shell.run, include a command template in command. Use {{fieldName}} placeholders for user inputs.",
+        "Keep fields practical and typed. Prefer text, textarea, select, checkbox, and folder fields that map to command arguments.",
+        "The app shell-quotes placeholder values before execution, so do not wrap placeholders in quotes.",
+        "For video download requests you may use yt-dlp.download, but shell.run is valid for everything else including ssh, git, ffmpeg, python, npm, and system tools."
       ].join(" "),
       prompt: `User request: ${userPrompt}`
     });
@@ -95,24 +97,19 @@ ipcMain.handle("dialog:select-folder", async () => {
 });
 
 ipcMain.handle("tool:run", async (event, request: ToolRunRequest) => {
-  if (request.tool !== "yt-dlp.download") {
-    throw new Error("This prototype only executes the yt-dlp.download tool.");
-  }
-
   const runId = randomUUID();
-  const { args, outputDir } = buildYtDlpArgs(request.values);
-  const command = `yt-dlp ${args.map(shellQuote).join(" ")}`;
+  const commandConfig = buildCommand(request);
   const sender = event.sender;
 
-  sender.send("tool:output", { runId, type: "start", command });
+  sender.send("tool:output", { runId, type: "start", command: commandConfig.command });
 
-  const child = spawn("yt-dlp", args, {
-    cwd: outputDir,
+  const child = spawn(commandConfig.file, commandConfig.args, {
+    cwd: commandConfig.cwd,
     env: {
       ...process.env,
       PATH: expandGuiPath(process.env.PATH)
     },
-    shell: false
+    shell: commandConfig.shell
   });
 
   activeRuns.set(runId, child);
@@ -134,7 +131,7 @@ ipcMain.handle("tool:run", async (event, request: ToolRunRequest) => {
     sender.send("tool:output", { runId, type: "exit", code, signal });
   });
 
-  return { runId, command };
+  return { runId, command: commandConfig.command };
 });
 
 ipcMain.handle("tool:cancel", async (_event, runId: string) => {
@@ -154,20 +151,22 @@ function createFallbackUi(userPrompt: string): GeneratedUi {
 
   if (!looksLikeVideoDownload) {
     return {
-      title: "Unsupported Utility",
-      summary: "UITerm can sketch this request, but the current executable prototype only has a safe yt-dlp tool.",
-      tool: "noop",
+      title: "Local Command",
+      summary: "A generic command runner for this task. Edit the command before running it.",
+      tool: "shell.run",
       fields: [
         {
-          name: "request",
-          label: "Request",
+          name: "command",
+          label: "Command",
           type: "textarea",
           defaultValue: userPrompt,
-          description: "The next step would be adding this as a typed tool in the registry."
+          description: "Runs locally in your home folder."
         }
       ],
-      action: { label: "No executable tool yet", tool: "noop" },
-      safety: ["Unsupported requests do not run shell commands."]
+      action: { label: "Run command", tool: "shell.run" },
+      command: "{{command}}",
+      previewCommand: "{{command}}",
+      safety: ["Command is shown before execution.", "Runs are cancellable."]
     };
   }
 
@@ -215,6 +214,40 @@ function createFallbackUi(userPrompt: string): GeneratedUi {
   };
 }
 
+function buildCommand(request: ToolRunRequest): {
+  file: string;
+  args: string[];
+  cwd: string;
+  shell: boolean;
+  command: string;
+} {
+  if (request.tool === "yt-dlp.download") {
+    const { args, outputDir } = buildYtDlpArgs(request.values);
+    return {
+      file: "yt-dlp",
+      args,
+      cwd: outputDir,
+      shell: false,
+      command: `yt-dlp ${args.map(shellQuote).join(" ")}`
+    };
+  }
+
+  if (request.tool === "shell.run") {
+    const command = renderCommandTemplate(request.command || "", request.values).trim();
+    if (!command) throw new Error("No command was generated.");
+
+    return {
+      file: command,
+      args: [],
+      cwd: app.getPath("home"),
+      shell: true,
+      command
+    };
+  }
+
+  throw new Error("No executable tool was generated for this task.");
+}
+
 function buildYtDlpArgs(values: ToolRunRequest["values"]): { args: string[]; outputDir: string } {
   const urls = String(values.urls || "")
     .split(/\r?\n/)
@@ -250,6 +283,14 @@ function buildYtDlpArgs(values: ToolRunRequest["values"]): { args: string[]; out
 function shellQuote(value: string): string {
   if (/^[A-Za-z0-9_./:=@%+-]+$/.test(value)) return value;
   return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function renderCommandTemplate(template: string, values: ToolRunRequest["values"]): string {
+  return template.replace(/\{\{([A-Za-z0-9_]+)\}\}/g, (_match, key: string) => {
+    const value = values[key];
+    if (typeof value === "boolean") return value ? "true" : "false";
+    return shellQuote(String(value ?? ""));
+  });
 }
 
 function expandGuiPath(currentPath = ""): string {
