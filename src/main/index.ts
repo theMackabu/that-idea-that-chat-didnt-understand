@@ -3,7 +3,7 @@ import { generateObject } from 'ai';
 import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { accessSync, constants, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { generatedUiSchema, type ComposeUiRequest, type GeneratedUi, type ToolRunRequest } from '../shared/schema';
@@ -70,8 +70,9 @@ ipcMain.handle('ai:compose-ui', async (_event, request: ComposeUiRequest | strin
   try {
     const openai = createOpenAI({ apiKey: openaiApiKey });
 
+    const modelName = localEnv.OPENAI_MODEL?.trim() || 'gpt-4.1-mini';
     const result = await generateObject({
-      model: openai(localEnv.OPENAI_MODEL?.trim() || 'gpt-4.1-mini'),
+      model: openai(modelName),
       schema: generatedUiSchema,
       system: [
         'You create schema-driven utility UIs for a local Electron app called Workbench.',
@@ -92,7 +93,9 @@ ipcMain.handle('ai:compose-ui', async (_event, request: ComposeUiRequest | strin
       prompt: buildComposePrompt(composeRequest)
     });
 
-    return generatedUiSchema.parse(result.object);
+    const draftUi = generatedUiSchema.parse(result.object);
+    const reviewedUi = await reviewGeneratedUi(openai, localEnv.OPENAI_REVIEW_MODEL?.trim() || modelName, composeRequest, draftUi);
+    return generatedUiSchema.parse(reviewedUi);
   } catch (error) {
     return {
       ...fallback,
@@ -134,6 +137,39 @@ function buildComposePrompt(request: ComposeUiRequest): string {
     'Context from the current Workbench thread follows. Use it to preserve continuity and resolve pronouns/deictic references.',
     JSON.stringify(context, null, 2)
   ].join('\n\n');
+}
+
+async function reviewGeneratedUi(
+  openai: ReturnType<typeof createOpenAI>,
+  modelName: string,
+  request: ComposeUiRequest,
+  draftUi: GeneratedUi
+): Promise<GeneratedUi> {
+  const result = await generateObject({
+    model: openai(modelName),
+    schema: generatedUiSchema,
+    system: [
+      'You are a command correctness reviewer for Workbench.',
+      'Return the corrected UI object only.',
+      'Preserve the user intent and concise UI style, but fix command mistakes before the UI reaches the user.',
+      'Every {{placeholder}} in command or previewCommand must correspond to a field name.',
+      'Every field that affects execution should be represented in the command.',
+      'Do not invent hardcoded local paths unless supplied by the user context.',
+      'Do not use an output template, glob, CLI-specific placeholder, or generated filename pattern as if it were a concrete file path in a later command.',
+      'If a command must use a later output file, add an explicit output file/path field and reference that field consistently.',
+      'If the request depends on an external CLI, keep it as a shell.run command. The runtime will check whether the CLI exists.',
+      'If the command cannot be made reasonably correct or safe, return a noop UI explaining the missing information in one short sentence.'
+    ].join(' '),
+    prompt: [
+      `Latest user request: ${request.prompt}`,
+      'Context:',
+      buildComposePrompt(request),
+      'Draft UI to review:',
+      JSON.stringify(draftUi, null, 2)
+    ].join('\n\n')
+  });
+
+  return generatedUiSchema.parse(result.object);
 }
 
 ipcMain.handle('dialog:select-folder', async () => {
@@ -222,6 +258,8 @@ function buildCommand(request: ToolRunRequest): {
     const command = renderCommandTemplate(request.command || '', request.values).trim();
     if (!command) throw new Error('No command was generated.');
     const argv = splitCommandLine(command);
+    const executable = findExecutableToCheck(argv);
+    if (executable) ensureExecutableAvailable(executable);
 
     if (argv.length > 0 && !needsShell(command)) {
       return {
@@ -249,6 +287,90 @@ function shellQuote(value: string): string {
   if (/^[A-Za-z0-9_./:=@%+-]+$/.test(value)) return value;
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
+
+function findExecutableToCheck(argv: string[]): string | null {
+  let skipNext = false;
+
+  for (const token of argv) {
+    if (skipNext) {
+      skipNext = false;
+      continue;
+    }
+
+    if (pathArgumentBuiltins.has(token)) {
+      skipNext = true;
+      continue;
+    }
+
+    if (!token || token.includes('=') || shellControlTokens.has(token) || shellBuiltins.has(token)) continue;
+    if (token.startsWith('-')) continue;
+    return token;
+  }
+
+  return null;
+}
+
+function ensureExecutableAvailable(executable: string) {
+  if (executable.includes('/')) {
+    if (isExecutable(executable)) return;
+    throw new Error(`Cannot find ${executable}. Check the path or install the tool before running this command.`);
+  }
+
+  const pathValue = expandGuiPath(process.env.PATH);
+  const found = pathValue
+    .split(':')
+    .filter(Boolean)
+    .some(directory => isExecutable(join(directory, executable)));
+
+  if (found) return;
+
+  throw new Error(
+    `Cannot find "${executable}" on this Mac. Install it first, then try again. If you use Homebrew, the command is usually: brew install ${executable}`
+  );
+}
+
+function isExecutable(path: string) {
+  try {
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const shellControlTokens = new Set(['&&', '||', '|', ';', '&', '(', ')']);
+const pathArgumentBuiltins = new Set(['.', 'cd', 'source']);
+const shellBuiltins = new Set([
+  '.',
+  'alias',
+  'bg',
+  'break',
+  'cd',
+  'command',
+  'continue',
+  'echo',
+  'eval',
+  'exec',
+  'exit',
+  'export',
+  'false',
+  'fg',
+  'hash',
+  'jobs',
+  'pwd',
+  'read',
+  'set',
+  'shift',
+  'source',
+  'test',
+  'true',
+  'type',
+  'ulimit',
+  'umask',
+  'unalias',
+  'unset',
+  'wait'
+]);
 
 function splitCommandLine(command: string): string[] {
   const args: string[] = [];
