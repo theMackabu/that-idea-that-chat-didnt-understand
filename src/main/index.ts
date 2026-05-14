@@ -11,6 +11,8 @@ import { generatedUiSchema, type ComposeUiRequest, type GeneratedUi, type ToolRu
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const activeRuns = new Map<string, ChildProcessWithoutNullStreams>();
+const defaultUiModel = 'gpt-5-mini';
+const defaultReviewModel = 'gpt-5-mini';
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -71,7 +73,7 @@ ipcMain.handle('ai:compose-ui', async (_event, request: ComposeUiRequest | strin
   try {
     const openai = createOpenAI({ apiKey: openaiApiKey });
 
-    const modelName = localEnv.OPENAI_MODEL?.trim() || 'gpt-5.2';
+    const modelName = localEnv.OPENAI_MODEL?.trim() || defaultUiModel;
     const result = await generateObject({
       model: openai(modelName),
       schema: generatedUiSchema,
@@ -393,7 +395,7 @@ async function reviseFailedCommand(request: ToolRunRequest, failedCommand: strin
 
   try {
     const openai = createOpenAI({ apiKey: openaiApiKey });
-    const modelName = localEnv.OPENAI_REVIEW_MODEL?.trim() || localEnv.OPENAI_MODEL?.trim() || 'gpt-5.2';
+    const modelName = localEnv.OPENAI_REVIEW_MODEL?.trim() || localEnv.OPENAI_MODEL?.trim() || defaultReviewModel;
     const result = await generateObject({
       model: openai(modelName),
       schema: z.object({
