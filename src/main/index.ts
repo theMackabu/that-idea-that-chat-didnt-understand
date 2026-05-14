@@ -18,7 +18,9 @@ function createWindow(): void {
     minWidth: 980,
     minHeight: 680,
     title: "UITerm",
-    backgroundColor: "#f7f7f4",
+    backgroundColor: "#0a0a0b",
+    titleBarStyle: "hiddenInset",
+    trafficLightPosition: { x: 16, y: 17 },
     webPreferences: {
       preload: join(__dirname, "../preload/index.mjs"),
       sandbox: false,
