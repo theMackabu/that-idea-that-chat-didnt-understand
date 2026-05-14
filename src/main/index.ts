@@ -85,6 +85,7 @@ ipcMain.handle('ai:compose-ui', async (_event, request: ComposeUiRequest | strin
         'For shell.run, include a command template in command. Use {{fieldName}} placeholders for user inputs.',
         'Only simple placeholders are supported. Do not use Handlebars, Mustache sections, conditionals, loops, helpers, {{#if}}, {{/if}}, or similar template syntax.',
         'For optional flags, write shell conditionals using quoted placeholder values, e.g. if [ {{includeHidden}} = true ]; then ...; fi.',
+        'For optional multi-argument command fragments, use shell arrays, e.g. FIND_ARGS=(); FIND_ARGS+=( -not -path "*/.*" ); find "$ROOT" "${FIND_ARGS[@]}". Do not store quoted multi-argument fragments in strings.',
         'Generate multi-step shell commands with newlines. Do not flatten shell scripts into one long line.',
         'Keep fields practical and typed. Use text, textarea, select, checkbox, file, folder, number, slider, and color fields that map to command arguments.',
         'Use file fields for source files, config files, archives, media files, PDFs, logs, and explicit output files. Use folder fields only for directories.',
@@ -193,6 +194,8 @@ async function reviewGeneratedUi(
       'For follow-up transforms, do not include the old download/generation command again unless the user explicitly asked to redo it.',
       'For requests to play, open, or watch an existing produced file, use macOS open against that file. Do not redownload or transform it.',
       'Commands must be valid when rendered as shell scripts. Multi-step scripts should contain newlines or semicolons before case/if/then/esac/fi boundaries.',
+      'Do not store multi-argument command fragments in string variables like HIDDEN_FILTER="-not -path \'*/.*\'"; quotes inside variables are literal. Use arrays instead.',
+      'For find commands with optional filters, use arrays such as FIND_ARGS=(); FIND_ARGS+=( -not -path "*/.*" ); find "$ROOT" "${FIND_ARGS[@]}".',
       'For download-and-open workflows, do not call the downloader twice. Capture the final downloaded filepath during the same run, then open that path.',
       'Do not quote tilde paths like "~/Downloads"; quoted tilde does not expand. Use $HOME/Downloads or an absolute folder path.',
       'Avoid set -o pipefail for discovery pipelines that intentionally stop early with head, tail, grep -q, or similar consumers.',
@@ -381,7 +384,7 @@ function runCommandProcess(
 
     child.stderr.on('data', (chunk: Buffer) => {
       const text = chunk.toString();
-      chunks.push(text);
+      chunks.push(`\u0000stderr:${text}`);
       sender.send('tool:output', { runId, type: 'chunk', stream: 'stderr', text });
     });
 
@@ -392,15 +395,24 @@ function runCommandProcess(
     });
 
     child.on('exit', (code, signal) => {
+      const output = chunks.join('').slice(-8000);
+      const effectiveCode = code === 0 && hasCommandErrorOutput(output) ? 1 : code;
       activeRuns.delete(runId);
       resolve({
-        code,
+        code: effectiveCode,
         signal,
-        output: chunks.join('').slice(-8000),
+        output,
         cancelled: signal === 'SIGTERM'
       });
     });
   });
+}
+
+function hasCommandErrorOutput(output: string) {
+  return output
+    .split('\u0000stderr:')
+    .slice(1)
+    .some(chunk => /(?:^|\n)(?:find|awk|stat|xargs|sort|head|tail|grep|sed):\s+/i.test(chunk));
 }
 
 async function reviseFailedCommand(request: ToolRunRequest, failedCommand: string, output: string): Promise<string | null> {
