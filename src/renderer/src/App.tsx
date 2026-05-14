@@ -291,6 +291,10 @@ export function App() {
 
       setLogs(current => [...current, toTerminalEntry(event)]);
 
+      if (event.type === 'retry') {
+        setStatus('Retrying');
+      }
+
       if (event.type === 'exit') {
         setRunning(false);
         setRunId(null);
@@ -1269,7 +1273,7 @@ function ToolForm(props: {
   onCancel: () => void;
 }) {
   const { ui, values, setValues, commandPreview, running, logs, showOutput, onToggleOutput, onRun, onCancel } = props;
-  const progress = useMemo(() => parseTerminalProgress(logs), [logs]);
+  const progress = useMemo(() => (running ? parseTerminalProgress(logs) : null), [logs, running]);
   const terminalPreview = useMemo(() => getTerminalPreviewLines(logs), [logs]);
 
   function setValue(name: string, value: string | number | boolean) {
@@ -1323,10 +1327,22 @@ function ToolForm(props: {
           type="button"
           onClick={onRun}
           disabled={ui.action.tool === 'noop' || running}
-          className="flex h-9 flex-1 select-none items-center justify-center gap-2 rounded-md bg-[var(--primary)] px-3 text-sm font-medium text-[var(--primary-contrast)] transition hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-45"
+          className={cn(
+            'relative flex h-9 flex-1 select-none items-center justify-center gap-2 overflow-hidden rounded-md bg-[var(--primary)] px-3 text-sm font-medium text-[var(--primary-contrast)] transition hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed',
+            running ? 'disabled:opacity-100' : 'disabled:opacity-45'
+          )}
         >
-          {running ? <Loader2 className="animate-spin" size={16} /> : <Play size={16} />}
-          {ui.action.label}
+          {progress ? (
+            <span
+              className="absolute inset-y-0 left-0 bg-[var(--primary-contrast)]/14 transition-[width] duration-200"
+              style={{ width: `${progress.percent}%` }}
+            />
+          ) : null}
+          <span className="relative z-10 flex min-w-0 items-center justify-center gap-2">
+            {running ? <Loader2 className="shrink-0 animate-spin" size={16} /> : <Play className="shrink-0" size={16} />}
+            <span className="truncate">{progress ? progress.label : ui.action.label}</span>
+            {progress ? <span className="shrink-0 font-mono text-xs opacity-70">{Math.round(progress.percent)}%</span> : null}
+          </span>
         </button>
         <button
           type="button"
@@ -1338,8 +1354,6 @@ function ToolForm(props: {
           Stop
         </button>
       </div>
-
-      {progress ? <TerminalProgress progress={progress} /> : null}
 
       <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)]/80">
         <button
@@ -1401,6 +1415,31 @@ function FieldRenderer(props: { field: GeneratedField; value: FieldValue; onChan
           placeholder={field.placeholder}
           className={cn('h-10 w-full px-3', fieldControlClass)}
         />
+      ) : null}
+
+      {field.type === 'file' ? (
+        <div className="flex gap-2">
+          <input
+            id={inputId}
+            name={field.name}
+            type="text"
+            value={String(value ?? '')}
+            onChange={event => onChange(event.target.value)}
+            placeholder={field.placeholder}
+            className={cn('h-10 min-w-0 flex-1 px-3', fieldControlClass)}
+          />
+          <button
+            type="button"
+            onClick={async () => {
+              const file = await window.uiterm.selectFile();
+              if (file) onChange(file);
+            }}
+            className="flex h-10 w-11 select-none items-center justify-center rounded-md border border-[var(--border)] bg-[var(--surface-muted)] text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text-strong)]"
+            title="Choose file"
+          >
+            <FileText size={16} />
+          </button>
+        </div>
       ) : null}
 
       {field.type === 'select' ? (
@@ -1521,20 +1560,6 @@ function FieldRenderer(props: { field: GeneratedField; value: FieldValue; onChan
 
       {field.description ? <p className="mt-1 text-sm leading-6 text-[var(--text-faint)]">{field.description}</p> : null}
     </label>
-  );
-}
-
-function TerminalProgress({ progress }: { progress: ParsedProgress }) {
-  return (
-    <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2.5">
-      <div className="mb-2 flex items-center justify-between gap-3 text-sm">
-        <span className="truncate text-[var(--text-muted)]">{progress.label}</span>
-        <span className="font-mono text-[var(--text-faint)]">{Math.round(progress.percent)}%</span>
-      </div>
-      <div className="h-1.5 overflow-hidden rounded-full bg-[var(--surface-subtle)]">
-        <div className="h-full rounded-full bg-[var(--accent)] transition-[width] duration-200" style={{ width: `${progress.percent}%` }} />
-      </div>
-    </div>
   );
 }
 

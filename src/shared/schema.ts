@@ -3,7 +3,7 @@ import { z } from "zod";
 export const fieldSchema = z.object({
   name: z.string().min(1),
   label: z.string().min(1),
-  type: z.enum(["text", "textarea", "select", "checkbox", "folder", "number", "slider", "color"]),
+  type: z.enum(["text", "textarea", "select", "checkbox", "file", "folder", "number", "slider", "color"]),
   placeholder: z.string().optional(),
   description: z.string().optional(),
   required: z.boolean().optional(),

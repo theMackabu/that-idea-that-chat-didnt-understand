@@ -3,6 +3,7 @@ import type { ComposeUiRequest, GeneratedUi, ToolOutputEvent, ToolRunRequest } f
 
 const api = {
   composeUi: (request: ComposeUiRequest): Promise<GeneratedUi> => ipcRenderer.invoke("ai:compose-ui", request),
+  selectFile: (): Promise<string | null> => ipcRenderer.invoke("dialog:select-file"),
   selectFolder: (): Promise<string | null> => ipcRenderer.invoke("dialog:select-folder"),
   runAction: (request: ToolRunRequest): Promise<{ runId: string; command: string }> =>
     ipcRenderer.invoke("tool:run", request),

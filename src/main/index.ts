@@ -4,7 +4,7 @@ import { app, BrowserWindow, dialog, ipcMain, type WebContents } from 'electron'
 import { randomUUID } from 'node:crypto';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { accessSync, constants, existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { generatedUiSchema, type ComposeUiRequest, type GeneratedUi, type ToolRunRequest } from '../shared/schema';
@@ -81,7 +81,9 @@ ipcMain.handle('ai:compose-ui', async (_event, request: ComposeUiRequest | strin
         'Create a compact UI for any local command-line task the user asks for.',
         'Use tool shell.run for executable tasks. Use noop only when there is genuinely nothing local to run.',
         'For shell.run, include a command template in command. Use {{fieldName}} placeholders for user inputs.',
-        'Keep fields practical and typed. Use text, textarea, select, checkbox, folder, number, slider, and color fields that map to command arguments.',
+        'Keep fields practical and typed. Use text, textarea, select, checkbox, file, folder, number, slider, and color fields that map to command arguments.',
+        'Use file fields for source files, config files, archives, media files, PDFs, logs, and explicit output files. Use folder fields only for directories.',
+        'Prefer picker-backed file/folder fields over asking the user to type paths.',
         'Use blocks for generated non-input UI: box for notes/status panels, image for image previews, metric for single values, and barChart for simple graphs.',
         'When a request benefits from richer UI, include blocks before fields, such as metrics for counts, bar charts for comparisons, boxes for warnings/instructions, and image blocks for preview URLs or generated file outputs.',
         'The app shell-quotes placeholder values before execution, so do not wrap placeholders in quotes.',
@@ -89,6 +91,7 @@ ipcMain.handle('ai:compose-ui', async (_event, request: ComposeUiRequest | strin
         'When useful, generate multiple fields so the user can safely adjust hostnames, folders, flags, formats, services, ports, and filters before running.',
         'The user may be iterating on a previous generated tool. Use the provided conversation context, current UI values, command preview, and recent run output to resolve references like "that", "it", "the downloaded file", "same folder", or "the previous command".',
         'When the user asks to modify a previous artifact or result, preserve and prefill relevant paths, URLs, folders, formats, and options from context instead of asking for them again.',
+        'Never hardcode guessed filenames like video.mp4, output.mp4, result.txt, or %(title)s as later input paths. If a later step needs a file path, expose an explicit file field or use a concrete path from recent output.',
         'Use sparse UI copy: titles should be 2 to 5 words, summaries should be one short sentence, field descriptions should be omitted unless truly helpful, and any description should be under 8 words.',
         'Avoid explanatory box blocks for obvious workflows. Prefer concise controls over paragraphs.',
         'Do not add safety text telling the user to ensure a CLI is installed or works. Workbench checks missing executables before running.'
@@ -158,7 +161,9 @@ async function reviewGeneratedUi(
       'Every {{placeholder}} in command or previewCommand must correspond to a field name.',
       'Every field that affects execution should be represented in the command.',
       'Do not invent hardcoded local paths unless supplied by the user context.',
+      'Use file fields for individual input/output paths and folder fields for directories; prefer picker-backed fields over plain text path inputs.',
       'Do not use an output template, glob, CLI-specific placeholder, or generated filename pattern as if it were a concrete file path in a later command.',
+      'Reject guessed filenames such as video.mp4, output.mp4, result.txt, and %(title)s whenever the real produced filename can differ.',
       'If a command must use a later output file, add an explicit output file/path field and reference that field consistently.',
       'If the request depends on an external CLI, keep it as a shell.run command. The runtime will check whether the CLI exists.',
       'The app runs on macOS. Replace Linux-only openers such as xdg-open with open.',
@@ -176,6 +181,15 @@ async function reviewGeneratedUi(
 
   return generatedUiSchema.parse(result.object);
 }
+
+ipcMain.handle('dialog:select-file', async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ['openFile'],
+    defaultPath: app.getPath('downloads')
+  });
+
+  return result.canceled ? null : result.filePaths[0];
+});
 
 ipcMain.handle('dialog:select-folder', async () => {
   const result = await dialog.showOpenDialog({
@@ -217,7 +231,10 @@ async function runWithOneRepairAttempt(
   }
 
   const revisedCommand = await reviseFailedCommand(request, initialCommand.command, first.output);
-  if (!revisedCommand || revisedCommand.trim() === initialCommand.command.trim()) {
+  const reconciledCommand = revisedCommand
+    ? reconcileCommandWithProducedFiles(revisedCommand, first.output, initialCommand.cwd)
+    : null;
+  if (!reconciledCommand || reconciledCommand.trim() === initialCommand.command.trim()) {
     sender.send('tool:output', {
       runId,
       type: 'chunk',
@@ -230,7 +247,7 @@ async function runWithOneRepairAttempt(
 
   let revisedConfig: ReturnType<typeof buildCommand>;
   try {
-    revisedConfig = buildCommand({ ...request, tool: 'shell.run', command: revisedCommand });
+    revisedConfig = buildCommand({ ...request, tool: 'shell.run', command: reconciledCommand });
   } catch (error) {
     sender.send('tool:output', {
       runId,
@@ -329,6 +346,7 @@ async function reviseFailedCommand(request: ToolRunRequest, failedCommand: strin
         'Do not repeat a command that already failed unless the correction is meaningful.',
         'Use macOS commands. For opening files use open, not xdg-open.',
         'If output shows a downloaded or generated concrete path, use that concrete path rather than a template like %(title)s.',
+        'Do not shorten or normalize a generated filename. If output says video.mp4.webm, use video.mp4.webm exactly, not video.mp4.',
         'Do not redownload or redo expensive completed work if the failure happened after the output file was created; prefer the shortest follow-up command that completes the user intent.',
         'Keep user-provided paths and URLs intact.'
       ].join(' '),
@@ -346,6 +364,78 @@ async function reviseFailedCommand(request: ToolRunRequest, failedCommand: strin
   } catch {
     return null;
   }
+}
+
+function reconcileCommandWithProducedFiles(command: string, output: string, cwd: string): string {
+  const producedPaths = extractExistingOutputPaths(output, cwd);
+  if (producedPaths.length === 0) return command;
+
+  let revised = command;
+  for (const missingPath of extractMissingFilePaths(output)) {
+    const missingAbsolutePath = resolveOutputPath(missingPath, cwd);
+    if (existsSync(missingAbsolutePath)) continue;
+
+    const replacement = producedPaths.find(path => isLikelyReplacementForMissingPath(path, missingAbsolutePath));
+    if (!replacement) continue;
+
+    revised = replacePathReference(revised, missingPath, replacement);
+    if (missingPath !== missingAbsolutePath) {
+      revised = replacePathReference(revised, missingAbsolutePath, replacement);
+    }
+  }
+
+  return revised;
+}
+
+function extractExistingOutputPaths(output: string, cwd: string): string[] {
+  const candidates = new Set<string>();
+  const pathPattern = /"([^"\n]*(?:\/|\.\/)[^"\n]*)"|'([^'\n]*(?:\/|\.\/)[^'\n]*)'|((?:\.{1,2}\/|\/|~\/)[^\s,;:)]+)/g;
+  for (const match of output.matchAll(pathPattern)) {
+    const rawPath = match[1] ?? match[2] ?? match[3];
+    if (!rawPath) continue;
+    const resolvedPath = resolveOutputPath(rawPath.replace(/[.。]+$/, ''), cwd);
+    if (existsSync(resolvedPath)) candidates.add(resolvedPath);
+  }
+
+  return [...candidates];
+}
+
+function extractMissingFilePaths(output: string): string[] {
+  const paths = new Set<string>();
+  const patterns = [
+    /Cannot open file ['"]([^'"\n]+)['"][^\n]*(?:No such file|does not exist)/gi,
+    /The file ['"]?([^'"\n]+?)['"]?\s+does not exist/gi,
+    /Failed to open ['"]?([^'"\n]+?)['"]?(?:\.|\n|$)/gi
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of output.matchAll(pattern)) {
+      const rawPath = match[1]?.trim().replace(/[.。]+$/, '');
+      if (rawPath) paths.add(rawPath);
+    }
+  }
+
+  return [...paths];
+}
+
+function resolveOutputPath(path: string, cwd: string): string {
+  if (path.startsWith('~/')) return join(app.getPath('home'), path.slice(2));
+  if (isAbsolute(path)) return path;
+  return resolve(cwd, path);
+}
+
+function isLikelyReplacementForMissingPath(producedPath: string, missingPath: string): boolean {
+  if (producedPath.startsWith(`${missingPath}.`)) return true;
+  return dirname(producedPath) === dirname(missingPath) && basename(producedPath).startsWith(`${basename(missingPath)}.`);
+}
+
+function replacePathReference(command: string, fromPath: string, toPath: string): string {
+  let revised = command;
+  const replacement = shellQuote(toPath);
+  for (const quoted of [`'${fromPath}'`, `"${fromPath}"`]) {
+    revised = revised.replaceAll(quoted, replacement);
+  }
+  return revised.replaceAll(fromPath, replacement);
 }
 
 function createFallbackUi(userPrompt: string): GeneratedUi {
