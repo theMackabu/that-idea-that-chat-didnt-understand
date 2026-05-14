@@ -1339,6 +1339,8 @@ function ToolForm(props: {
         </button>
       </div>
 
+      {progress ? <TerminalProgress progress={progress} /> : null}
+
       <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)]/80">
         <button
           type="button"
@@ -1353,10 +1355,9 @@ function ToolForm(props: {
             {showOutput ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           </span>
         </button>
-        {progress ? <TerminalProgress progress={progress} /> : null}
         {!showOutput && terminalPreview.length > 0 ? <TerminalPreview lines={terminalPreview} /> : null}
         {showOutput ? (
-          <div className={cn('border-t border-[var(--border)] p-3', progress ? 'pt-3' : '')}>
+          <div className="border-t border-[var(--border)] p-3">
             <TerminalPane entries={logs} />
           </div>
         ) : null}
@@ -1525,7 +1526,7 @@ function FieldRenderer(props: { field: GeneratedField; value: FieldValue; onChan
 
 function TerminalProgress({ progress }: { progress: ParsedProgress }) {
   return (
-    <div className="border-t border-[var(--border)] px-3 py-2.5">
+    <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2.5">
       <div className="mb-2 flex items-center justify-between gap-3 text-sm">
         <span className="truncate text-[var(--text-muted)]">{progress.label}</span>
         <span className="font-mono text-[var(--text-faint)]">{Math.round(progress.percent)}%</span>
