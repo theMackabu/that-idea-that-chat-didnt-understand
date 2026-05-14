@@ -11,6 +11,11 @@ const api = {
     const listener = (_event: Electron.IpcRendererEvent, payload: ToolOutputEvent) => callback(payload);
     ipcRenderer.on("tool:output", listener);
     return () => ipcRenderer.removeListener("tool:output", listener);
+  },
+  onToggleSidebar: (callback: () => void): (() => void) => {
+    const listener = () => callback();
+    ipcRenderer.on("app:toggle-sidebar", listener);
+    return () => ipcRenderer.removeListener("app:toggle-sidebar", listener);
   }
 };
 

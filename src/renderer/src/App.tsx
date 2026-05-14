@@ -19,6 +19,7 @@ import {
   Search,
   Server,
   ShieldCheck,
+  Palette,
   Square,
   Terminal,
   TerminalSquare,
@@ -288,6 +289,12 @@ export function App() {
     writeStoredToolHistory(toolHistory);
   }, [toolHistory]);
 
+  useEffect(() => {
+    return window.uiterm.onToggleSidebar(() => {
+      setSidebarOpen(current => !current);
+    });
+  }, []);
+
   const commandPreview = useMemo(() => {
     if (!ui) return 'No executable command';
 
@@ -416,16 +423,16 @@ export function App() {
 
   return (
     <main className="flex h-screen flex-col bg-[var(--app-bg)] text-[var(--text)] transition-colors duration-200">
-      <header className="app-drag flex h-12 shrink-0 select-none items-center justify-between border-b border-[var(--border)] bg-[var(--chrome-bg)] pr-4 pl-24">
-        <div className="flex items-center gap-3 text-sm text-[var(--text-muted)]">
+      <header className="app-drag flex h-10 shrink-0 select-none items-center justify-between border-b border-[var(--border)] bg-[var(--chrome-bg)] pr-3 pl-24">
+        <div className="flex items-center gap-2 text-[13px] text-[var(--text-muted)]">
           <button
             type="button"
             onClick={startNewTask}
-            className="app-no-drag flex select-none items-center gap-3 rounded-md px-1 py-1 text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text-strong)]"
+            className="app-no-drag flex select-none items-center gap-2 rounded-md px-1.5 py-1 text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text-strong)]"
             title="New task"
           >
-            <TerminalSquare size={17} className="text-[var(--text-faint)]" />
-            <span>UITerm</span>
+            <Palette size={15} className="text-[var(--text-faint)]" />
+            <span>Workbench</span>
           </button>
           <span className="text-[var(--text-faint)]">/</span>
           <span className="font-medium text-[var(--text-strong)]">{taskTitle}</span>
@@ -434,17 +441,17 @@ export function App() {
           <button
             type="button"
             onClick={() => setSidebarOpen(current => !current)}
-            className="flex size-8 select-none items-center justify-center rounded-md text-[var(--text-faint)] transition hover:bg-[var(--hover)] hover:text-[var(--text-strong)]"
+            className="flex size-7 select-none items-center justify-center rounded-md text-[var(--text-faint)] transition hover:bg-[var(--hover)] hover:text-[var(--text-strong)]"
             title="Toggle generated tools"
           >
-            <PanelRight size={17} />
+            <PanelRight size={15} />
           </button>
         </div>
       </header>
 
-      <section className="flex min-h-0 flex-1">
+      <section className="relative flex min-h-0 flex-1 overflow-hidden">
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="stable-scrollbar min-h-0 flex-1 overflow-y-auto">
             <div className={cn('mx-auto flex min-h-full w-full max-w-3xl flex-col px-6 pt-10', ui ? 'pb-64' : 'pb-28')}>
               {ui ? (
                 <div className="space-y-7">
@@ -487,14 +494,9 @@ function ToolSidebar(props: { items: ToolHistoryItem[]; activeId: string | null;
   const { items, activeId, onSelect } = props;
 
   return (
-    <aside className="app-no-drag relative z-20 flex w-80 shrink-0 select-none flex-col border-l border-[var(--border)] bg-[var(--chrome-bg)]">
-      <div className="border-b border-[var(--border)] px-4 py-3">
-        <div className="text-sm font-medium text-[var(--text-strong)]">Generated tools</div>
-        <div className="mt-1 text-sm text-[var(--text-faint)]">{items.length === 1 ? '1 tool' : `${items.length} tools`}</div>
-      </div>
-
+    <aside className="app-no-drag absolute inset-y-0 right-0 z-20 flex w-80 select-none flex-col border-l border-[var(--border)] bg-[var(--chrome-bg)] shadow-[-8px_0_18px_rgba(0,0,0,0.12)]">
       {items.length > 0 ? (
-        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+        <div className="stable-scrollbar min-h-0 flex-1 overflow-y-auto p-2">
           {items.map(item => (
             <button
               key={item.id}
@@ -511,7 +513,7 @@ function ToolSidebar(props: { items: ToolHistoryItem[]; activeId: string | null;
           ))}
         </div>
       ) : (
-        <div className="px-4 py-5 text-sm leading-6 text-[var(--text-faint)]">Generated tools will show up here after you send a task.</div>
+        <div className="px-4 py-3 text-sm leading-6 text-[var(--text-faint)]">Generated tools will show up here after you send a task.</div>
       )}
     </aside>
   );
@@ -526,7 +528,7 @@ function TaskTranscript({ messages }: { messages: ChatMessage[] }) {
             {message.role === 'user' ? <WandSparkles size={14} /> : <TerminalSquare size={14} />}
           </div>
           <div>
-            <div className="text-sm font-medium text-[var(--text-strong)]">{message.role === 'user' ? 'Task' : 'UITerm'}</div>
+            <div className="text-sm font-medium text-[var(--text-strong)]">{message.role === 'user' ? 'Task' : 'Workbench'}</div>
             <p className="mt-1 max-w-[68ch] text-sm leading-6 text-pretty text-[var(--text-muted)]">{message.content}</p>
           </div>
         </div>
@@ -595,7 +597,10 @@ function Composer(props: {
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-0 z-10 bg-gradient-to-t from-[var(--app-bg)] via-[var(--app-bg)] to-transparent px-6 pb-7 pt-12">
       <div className="pointer-events-auto mx-auto w-full max-w-2xl">
-        <form onSubmit={onSubmit} className="app-no-drag rounded-lg border border-[var(--border)] bg-[var(--surface)] p-2 shadow-[var(--shadow-soft)]">
+        <form
+          onSubmit={onSubmit}
+          className="app-no-drag rounded-lg border border-[var(--border)] bg-[var(--surface)] p-2 shadow-[var(--shadow-soft)]"
+        >
           <textarea
             id="intent"
             name="intent"
@@ -631,7 +636,7 @@ function Composer(props: {
             <button
               type="submit"
               disabled={!prompt.trim() || composing}
-              className="flex h-8 select-none items-center justify-center gap-2 rounded-md bg-[var(--primary)] px-2.5 text-sm font-medium text-[var(--primary-contrast)] transition hover:bg-[var(--primary-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus)] disabled:bg-[var(--surface-subtle)] disabled:text-[var(--text-faint)]"
+              className="flex h-8 select-none items-center justify-center gap-2 rounded-md bg-[var(--primary)] px-2.5 text-sm font-medium text-[var(--primary-contrast)] transition hover:bg-[var(--primary-hover)] disabled:bg-[var(--surface-subtle)] disabled:text-[var(--text-faint)]"
               title="Send with Cmd+Enter"
             >
               {composing ? (
@@ -750,8 +755,8 @@ function IdeasDialog(props: { onClose: () => void; onChoose: (idea: { title: str
 
   return (
     <div className="fixed inset-0 z-20 bg-[var(--app-bg)]">
-      <div className="app-no-drag flex h-full flex-col">
-        <div className="flex h-12 shrink-0 select-none items-center justify-between border-b border-[var(--border)] bg-[var(--chrome-bg)] pr-4 pl-24">
+      <div className="flex h-full flex-col">
+        <div className="app-drag flex h-10 shrink-0 select-none items-center justify-between border-b border-[var(--border)] bg-[var(--chrome-bg)] pr-3 pl-24">
           <div className="flex items-center gap-1 text-sm text-[var(--text-muted)]" role="tablist" aria-label="Gallery sections">
             {(['examples', 'gallery'] as const).map(tab => (
               <button
@@ -761,7 +766,7 @@ function IdeasDialog(props: { onClose: () => void; onChoose: (idea: { title: str
                 aria-selected={activeTab === tab}
                 onClick={() => setActiveTab(tab)}
                 className={cn(
-                  'rounded-md px-3 py-1.5 font-medium transition',
+                  'app-no-drag rounded-md px-3 py-1 font-medium transition',
                   activeTab === tab
                     ? 'bg-[var(--surface-subtle)] text-[var(--text-strong)]'
                     : 'text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text-strong)]'
@@ -774,17 +779,17 @@ function IdeasDialog(props: { onClose: () => void; onChoose: (idea: { title: str
           <button
             type="button"
             onClick={onClose}
-            className="flex size-8 select-none items-center justify-center rounded-md text-[var(--text-faint)] transition hover:bg-[var(--hover)] hover:text-[var(--text-strong)]"
+            className="app-no-drag flex size-7 select-none items-center justify-center rounded-md text-[var(--text-faint)] transition hover:bg-[var(--hover)] hover:text-[var(--text-strong)]"
             title="Close"
           >
-            <X size={16} />
+            <X size={15} />
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-8">
+        <div className="app-no-drag stable-scrollbar min-h-0 flex-1 overflow-y-auto px-6 py-8">
           <div className="mx-auto w-full max-w-6xl">
             {activeTab === 'examples' ? (
-              <>
+              <div className="mx-auto max-w-5xl">
                 <div className="flex items-end justify-between gap-6">
                   <div>
                     <h2 className="text-3xl font-semibold tracking-tight text-[var(--text-strong)]">Examples</h2>
@@ -801,27 +806,67 @@ function IdeasDialog(props: { onClose: () => void; onChoose: (idea: { title: str
                   </button>
                 </div>
 
-                <div className="mt-8 grid gap-3 sm:grid-cols-3">
+                <div className="mt-8 grid gap-3">
                   {[featuredExample, ...toolExamples.slice(1, 3)].map(example => (
                     <button
                       key={`starter-${example.title}`}
                       type="button"
                       onClick={() => onChoose({ title: example.title, prompt: example.prompt })}
-                      className="group flex min-h-44 select-none flex-col rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 text-left transition hover:border-[var(--border-strong)] hover:bg-[var(--surface-muted)]"
+                      className="group grid select-none grid-cols-[auto_1fr_auto] items-center gap-4 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-left transition hover:border-[var(--border-strong)] hover:bg-[var(--surface-muted)]"
                     >
                       <span className="flex size-9 items-center justify-center rounded-md bg-[var(--surface-muted)] text-[var(--text-muted)]">
                         <CategoryIcon category={example.category} />
                       </span>
-                      <span className="mt-7 text-sm text-[var(--text-faint)]">{example.category}</span>
-                      <span className="mt-2 text-lg font-medium text-[var(--text-strong)]">{example.title}</span>
-                      <span className="mt-2 line-clamp-2 text-sm leading-6 text-[var(--text-muted)]">{example.description}</span>
-                      <span className="mt-auto pt-4 text-sm font-medium text-[var(--text-faint)] transition group-hover:text-[var(--text-strong)]">
-                        Use example
+                      <span className="min-w-0">
+                        <span className="flex items-center gap-2">
+                          <span className="truncate text-base font-medium text-[var(--text-strong)]">{example.title}</span>
+                          <span className="shrink-0 rounded-full bg-[var(--surface-muted)] px-2 py-0.5 text-sm text-[var(--text-faint)]">
+                            {example.category}
+                          </span>
+                        </span>
+                        <span className="mt-1 block truncate text-sm leading-6 text-[var(--text-muted)]">{example.description}</span>
+                      </span>
+                      <span className="rounded-md px-2 py-1 text-sm font-medium text-[var(--text-faint)] transition group-hover:bg-[var(--surface-subtle)] group-hover:text-[var(--text-strong)]">
+                        Use
                       </span>
                     </button>
                   ))}
                 </div>
-              </>
+
+                <div className="mt-10 flex select-none items-center justify-between border-b border-[var(--border)] pb-3">
+                  <div className="text-lg font-medium text-[var(--text-strong)]">More from the gallery</div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('gallery')}
+                    className="rounded-md px-2 py-1 text-sm font-medium text-[var(--text-faint)] transition hover:bg-[var(--hover)] hover:text-[var(--text-strong)]"
+                  >
+                    View all
+                  </button>
+                </div>
+
+                <div className="grid gap-3 py-5 sm:grid-cols-2 lg:grid-cols-3">
+                  {toolExamples.slice(3, 9).map(example => (
+                    <button
+                      key={`example-preview-${example.category}-${example.title}`}
+                      type="button"
+                      onClick={() => onChoose({ title: example.title, prompt: example.prompt })}
+                      className="group flex min-h-32 select-none flex-col rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 text-left transition hover:border-[var(--border-strong)] hover:bg-[var(--surface-muted)]"
+                    >
+                      <span className="flex items-center gap-2">
+                        <span className="flex size-7 items-center justify-center rounded-md bg-[var(--surface-muted)] text-[var(--text-muted)]">
+                          <CategoryIcon category={example.category} />
+                        </span>
+                        <span className="text-sm text-[var(--text-faint)]">{example.category}</span>
+                      </span>
+                      <span className="mt-4 text-sm font-medium text-[var(--text-strong)]">{example.title}</span>
+                      <span className="mt-1 line-clamp-2 text-sm leading-6 text-[var(--text-muted)]">{example.description}</span>
+                      <span className="mt-auto pt-3 text-sm font-medium text-[var(--text-faint)] transition group-hover:text-[var(--text-strong)]">
+                        Use template
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             ) : (
               <>
                 <div className="flex items-end justify-between gap-6">
@@ -832,7 +877,7 @@ function IdeasDialog(props: { onClose: () => void; onChoose: (idea: { title: str
                     </p>
                   </div>
                   <div className="hidden select-none rounded-full bg-[var(--surface-muted)] px-3 py-1 text-sm text-[var(--text-faint)] sm:block">
-                    {filteredExamples.length} shown
+                    {visibleGalleryExamples.length} shown
                   </div>
                 </div>
 
@@ -848,20 +893,43 @@ function IdeasDialog(props: { onClose: () => void; onChoose: (idea: { title: str
                   </div>
                 </div>
 
-                <div className="mt-8 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface)]">
-                  {filteredExamples.map(example => (
+                <div className="mt-5 flex flex-wrap gap-2">
+                  {galleryCategories.map(category => (
+                    <button
+                      key={category}
+                      type="button"
+                      onClick={() => setActiveCategory(category)}
+                      className={cn(
+                        'rounded-full px-3 py-1.5 text-sm font-medium transition',
+                        activeCategory === category
+                          ? 'bg-[var(--primary)] text-[var(--primary-contrast)]'
+                          : 'bg-[var(--surface-muted)] text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text-strong)]'
+                      )}
+                    >
+                      {category}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {visibleGalleryExamples.map(example => (
                     <button
                       key={`${example.category}-${example.title}`}
                       type="button"
                       onClick={() => onChoose({ title: example.title, prompt: example.prompt })}
-                      className="group grid w-full select-none grid-cols-[minmax(130px,0.22fr)_1fr_auto] items-center gap-4 border-t border-[var(--border)] px-5 py-3 text-left first:border-t-0 hover:bg-[var(--hover)]"
+                      className="group flex min-h-44 select-none flex-col rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 text-left transition hover:border-[var(--border-strong)] hover:bg-[var(--surface-muted)]"
                     >
-                      <span className="text-sm text-[var(--text-faint)]">{example.category}</span>
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm font-medium text-[var(--text-strong)]">{example.title}</span>
-                        <span className="mt-0.5 block truncate text-sm text-[var(--text-muted)]">{example.description}</span>
+                      <span className="flex items-center justify-between gap-3">
+                        <span className="flex size-9 items-center justify-center rounded-md bg-[var(--surface-muted)] text-[var(--text-muted)]">
+                          <CategoryIcon category={example.category} />
+                        </span>
+                        <span className="rounded-full bg-[var(--surface-muted)] px-2 py-1 text-sm text-[var(--text-faint)]">{example.category}</span>
                       </span>
-                      <span className="text-sm font-medium text-[var(--text-faint)] transition group-hover:text-[var(--text-strong)]">Use</span>
+                      <span className="mt-6 text-base font-medium text-[var(--text-strong)]">{example.title}</span>
+                      <span className="mt-2 line-clamp-2 text-sm leading-6 text-[var(--text-muted)]">{example.description}</span>
+                      <span className="mt-auto pt-4 text-sm font-medium text-[var(--text-faint)] transition group-hover:text-[var(--text-strong)]">
+                        Use template
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -872,6 +940,24 @@ function IdeasDialog(props: { onClose: () => void; onChoose: (idea: { title: str
       </div>
     </div>
   );
+}
+
+function CategoryIcon({ category }: { category: string }) {
+  const iconProps = { size: 17, strokeWidth: 1.8 };
+
+  if (category === 'Media') return <Video {...iconProps} />;
+  if (category === 'Files') return <FileArchive {...iconProps} />;
+  if (category === 'Code') return <Code2 {...iconProps} />;
+  if (category === 'DevOps') return <Server {...iconProps} />;
+  if (category === 'Network') return <Network {...iconProps} />;
+  if (category === 'Data') return <Database {...iconProps} />;
+  if (category === 'Web') return <Globe2 {...iconProps} />;
+  if (category === 'Text' || category === 'Documents') return <FileText {...iconProps} />;
+  if (category === 'Logs' || category === 'Remote') return <Terminal {...iconProps} />;
+  if (category === 'Images') return <Image {...iconProps} />;
+  if (category === 'Audio') return <Music2 {...iconProps} />;
+
+  return <WandSparkles {...iconProps} />;
 }
 
 function InitialCommandBar(props: {
@@ -1074,7 +1160,9 @@ function ToolForm(props: {
         <h1 className="mt-2 text-2xl font-semibold tracking-tight text-balance text-[var(--text-strong)]">{ui.title}</h1>
         <p className="mt-2 max-w-[68ch] text-sm leading-6 text-pretty text-[var(--text-muted)]">{ui.summary}</p>
         {ui.aiNote ? (
-          <p className="mt-3 rounded-md border border-[var(--warning-border)] bg-[var(--warning-bg)] px-3 py-2 text-sm leading-6 text-[var(--warning-text)]">{ui.aiNote}</p>
+          <p className="mt-3 rounded-md border border-[var(--warning-border)] bg-[var(--warning-bg)] px-3 py-2 text-sm leading-6 text-[var(--warning-text)]">
+            {ui.aiNote}
+          </p>
         ) : null}
       </div>
 
@@ -1109,7 +1197,7 @@ function ToolForm(props: {
           type="button"
           onClick={onRun}
           disabled={ui.action.tool === 'noop' || running}
-          className="flex h-9 flex-1 select-none items-center justify-center gap-2 rounded-md bg-[var(--primary)] px-3 text-sm font-medium text-[var(--primary-contrast)] transition hover:bg-[var(--primary-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus)] disabled:cursor-not-allowed disabled:opacity-45"
+          className="flex h-9 flex-1 select-none items-center justify-center gap-2 rounded-md bg-[var(--primary)] px-3 text-sm font-medium text-[var(--primary-contrast)] transition hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-45"
         >
           {running ? <Loader2 className="animate-spin" size={16} /> : <Play size={16} />}
           {ui.action.label}
@@ -1154,7 +1242,7 @@ function FieldRenderer(props: { field: GeneratedField; value: FieldValue; onChan
   const { field, value, onChange } = props;
   const inputId = `field-${field.name}`;
   const fieldControlClass =
-    'rounded-md border border-[var(--border)] bg-[var(--surface-muted)] text-sm text-[var(--text-strong)] outline-none transition placeholder:text-[var(--text-faint)] focus:border-[var(--border-strong)] focus:bg-[var(--surface)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--focus)] max-sm:text-base';
+    'rounded-md border border-[var(--border)] bg-[var(--surface-muted)] text-sm text-[var(--text-strong)] outline-none transition placeholder:text-[var(--text-faint)] focus:border-[var(--border-strong)] focus:bg-[var(--surface)] max-sm:text-base';
 
   return (
     <label htmlFor={inputId} className="block">
@@ -1257,9 +1345,14 @@ function FieldRenderer(props: { field: GeneratedField; value: FieldValue; onChan
       {field.type === 'checkbox' ? (
         <div className="flex h-10 items-center justify-between rounded-md border border-[var(--border)] bg-[var(--surface-muted)] px-3">
           <span className="text-sm text-[var(--text-muted)]">{Boolean(value) ? 'Enabled' : 'Disabled'}</span>
-          <span className={cn('relative inline-flex w-10 rounded-full p-0.5 transition', value ? 'bg-[var(--primary)]' : 'bg-[var(--surface-subtle)]')}>
+          <span
+            className={cn('relative inline-flex w-10 rounded-full p-0.5 transition', value ? 'bg-[var(--primary)]' : 'bg-[var(--surface-subtle)]')}
+          >
             <span
-              className={cn('block aspect-square w-1/2 rounded-full bg-[var(--surface)] shadow-sm transition', value ? 'translate-x-full' : 'translate-x-0')}
+              className={cn(
+                'block aspect-square w-1/2 rounded-full bg-[var(--surface)] shadow-sm transition',
+                value ? 'translate-x-full' : 'translate-x-0'
+              )}
             />
             <input
               id={inputId}
@@ -1267,7 +1360,7 @@ function FieldRenderer(props: { field: GeneratedField; value: FieldValue; onChan
               type="checkbox"
               checked={Boolean(value)}
               onChange={event => onChange(event.target.checked)}
-              className="absolute inset-0 size-full appearance-none rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus)]"
+              className="absolute inset-0 size-full appearance-none rounded-full"
               aria-label={field.label}
             />
           </span>
@@ -1290,7 +1383,7 @@ function FieldRenderer(props: { field: GeneratedField; value: FieldValue; onChan
               const folder = await window.uiterm.selectFolder();
               if (folder) onChange(folder);
             }}
-            className="flex h-10 w-11 select-none items-center justify-center rounded-md border border-[var(--border)] bg-[var(--surface-muted)] text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text-strong)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus)]"
+            className="flex h-10 w-11 select-none items-center justify-center rounded-md border border-[var(--border)] bg-[var(--surface-muted)] text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text-strong)]"
             title="Choose folder"
           >
             <FolderOpen size={16} />
@@ -1311,7 +1404,7 @@ function inferDefaults(fields: GeneratedField[]): Record<string, FieldValue> {
         (field.type === 'checkbox'
           ? false
           : field.type === 'slider' || field.type === 'number'
-            ? field.min ?? 0
+            ? (field.min ?? 0)
             : field.type === 'color'
               ? '#85827d'
               : '')

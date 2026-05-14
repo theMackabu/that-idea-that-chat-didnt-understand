@@ -86,11 +86,22 @@ body {
   overflow: hidden;
 }
 
+.stable-scrollbar {
+  scrollbar-gutter: stable;
+}
+
 button,
 input,
 textarea,
 select {
   font-family: inherit;
+}
+
+button:focus,
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
 }
 
 .app-drag {
