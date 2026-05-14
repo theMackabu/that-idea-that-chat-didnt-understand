@@ -97,8 +97,8 @@ ipcMain.handle('ai:compose-ui', async (_event, request: ComposeUiRequest | strin
         'When useful, generate multiple fields so the user can safely adjust hostnames, folders, flags, formats, services, ports, and filters before running.',
         'For PDF creation or conversion tasks, build around explicit source and output file fields. Include an output PDF file field instead of guessing output.pdf.',
         'For PDF tasks, prefer installed purpose-built tools when available, such as pandoc for Markdown/HTML to PDF, qpdf or pdftk for splitting/merging, ImageMagick magick for images to PDF, and tesseract/ocrmypdf for OCR workflows. If a needed tool is missing, the reviewer will replace it with an installed equivalent or produce a concise noop.',
-        'For simple text-to-PDF tasks on macOS, prefer generating a temporary HTML file and printing it to PDF with an available renderer/tool rather than inventing PDF bytes by hand.',
-        'PDF commands should print the final output path on success, and optionally open the PDF with macOS open when the UI has an Open after create checkbox.',
+        'For simple report-to-PDF tasks on macOS, generate an HTML or text source and convert it with an actual installed PDF-capable CLI. Do not use Safari or osascript unless the command explicitly saves/exports the requested PDF path.',
+        'PDF commands must create the explicit output PDF path, then verify [ -s "$OUTPDF" ] before printing or opening it. Do not echo or open a PDF path before creating it.',
         'The user may be iterating on a previous generated tool. Use the provided conversation context, current UI values, command preview, and recent run output to resolve references like "that", "it", "the downloaded file", "same folder", or "the previous command".',
         'When the user asks to modify a previous artifact or result, preserve and prefill relevant paths, URLs, folders, formats, and options from context instead of asking for them again.',
         'For follow-up requests like "convert that downloaded file", use the concrete producedFiles path from context as the file field defaultValue and command input. Do not re-run the previous download or generation step.',
@@ -196,7 +196,9 @@ async function reviewGeneratedUi(
       'Use file fields for individual input/output paths and folder fields for directories; prefer picker-backed fields over plain text path inputs.',
       'For PDF creation/conversion UIs, require an explicit output PDF file field and make the command print that path after success.',
       'For PDF workflows, do not hardcode output.pdf or write binary PDF syntax manually in shell. Use an installed PDF-capable tool or a clear noop if no suitable tool is available.',
-      'When the user asks to open/view the created PDF, use macOS open on the explicit output PDF path after creation.',
+      'For PDF workflows, reject commands that only create HTML/text and then echo/open an output PDF path. The command must actually write the PDF and verify it exists with [ -s "$OUTPDF" ] before open.',
+      'Do not use Safari or osascript for PDF creation unless the command explicitly saves/exports the exact output PDF path. Opening HTML in Safari is not PDF creation.',
+      'When the user asks to open/view the created PDF, use macOS open on the explicit output PDF path only after successful creation and existence check.',
       'When context contains producedFiles and the latest request refers to that prior output, the UI must use a file field defaultValue set to the matching producedFiles path and the command must operate on that field.',
       'For follow-up transforms, do not include the old download/generation command again unless the user explicitly asked to redo it.',
       'For requests to play, open, or watch an existing produced file, use macOS open against that file. Do not redownload or transform it.',
@@ -416,10 +418,14 @@ function runCommandProcess(
 }
 
 function hasCommandErrorOutput(output: string) {
-  return output
-    .split('\u0000stderr:')
-    .slice(1)
-    .some(chunk => /(?:^|\n)(?:find|awk|stat|xargs|sort|head|tail|grep|sed):\s+/i.test(chunk));
+  return (
+    output
+      .split('\u0000stderr:')
+      .slice(1)
+      .some(chunk => /(?:^|\n)(?:find|awk|stat|xargs|sort|head|tail|grep|sed|open):\s+/i.test(chunk)) ||
+    /The file .+ does not exist\./i.test(output) ||
+    /Failed to open .+/i.test(output)
+  );
 }
 
 async function reviseFailedCommand(request: ToolRunRequest, failedCommand: string, output: string): Promise<string | null> {
@@ -444,6 +450,8 @@ async function reviseFailedCommand(request: ToolRunRequest, failedCommand: strin
         'If output shows a downloaded or generated concrete path, use that concrete path rather than a template like %(title)s.',
         'Do not shorten or normalize a generated filename. If output says video.mp4.webm, use video.mp4.webm exactly, not video.mp4.',
         'Do not redownload or redo expensive completed work if the failure happened after the output file was created; prefer the shortest follow-up command that completes the user intent.',
+        'If a PDF output path does not exist because the failed command never created a PDF, do not guess sibling HTML paths. Return null unless you can revise the original command to actually create the requested PDF.',
+        'Do not use Safari or osascript as a PDF converter unless the revised command saves/exports the exact requested PDF path.',
         'Keep user-provided paths and URLs intact.'
       ].join(' '),
       prompt: ['Original run request:', JSON.stringify(request, null, 2), 'Failed command:', failedCommand, 'Recent output:', output].join('\n\n')
@@ -592,11 +600,17 @@ function shellQuote(value: string): string {
 }
 
 function normalizeRenderedCommand(command: string): string {
-  return command
+  let normalized = command
     .replaceAll('"~/', '"$HOME/')
     .replaceAll("'~/", "'$HOME/")
     .replaceAll("stat -f '%z\\t%N'", "stat -f $'%z\\t%N'")
     .replaceAll('stat -f "%z\\t%N"', "stat -f $'%z\\t%N'");
+
+  if (/\|\s*(?:head|tail|grep\s+-q)\b/.test(normalized)) {
+    normalized = normalized.replace(/\bset\s+-euo\s+pipefail\b/g, 'set -eu').replace(/\bset\s+-eo\s+pipefail\b/g, 'set -e');
+  }
+
+  return normalized;
 }
 
 function assertSupportedTemplateSyntax(command: string) {
