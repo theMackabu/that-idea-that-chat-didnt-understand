@@ -58,6 +58,9 @@ const moreSuggestions = [
   'Generate thumbnails for videos'
 ];
 
+const toolHistoryStorageKey = 'uiterm.generatedTools.v1';
+const maxStoredTools = 50;
+
 export function App() {
   const [prompt, setPrompt] = useState('');
   const [taskTitle, setTaskTitle] = useState('Untitled task');
@@ -71,7 +74,7 @@ export function App() {
   const [composing, setComposing] = useState(false);
   const [showOutput, setShowOutput] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [toolHistory, setToolHistory] = useState<ToolHistoryItem[]>([]);
+  const [toolHistory, setToolHistory] = useState<ToolHistoryItem[]>(readStoredToolHistory);
   const [activeToolId, setActiveToolId] = useState<string | null>(null);
   const [taskTitleEdited, setTaskTitleEdited] = useState(false);
 
@@ -92,6 +95,10 @@ export function App() {
       }
     });
   }, []);
+
+  useEffect(() => {
+    writeStoredToolHistory(toolHistory);
+  }, [toolHistory]);
 
   const commandPreview = useMemo(() => {
     if (!ui) return 'No executable command';
@@ -134,17 +141,19 @@ export function App() {
       setTaskTitle(nextTaskTitle);
       setValues(nextValues);
       setActiveToolId(nextToolId);
-      setToolHistory(current => [
-        {
-          id: nextToolId,
-          title: nextTaskTitle,
-          summary: nextUi.summary,
-          request: userText,
-          ui: nextUi,
-          values: nextValues
-        },
-        ...current
-      ]);
+      setToolHistory(current =>
+        [
+          {
+            id: nextToolId,
+            title: nextTaskTitle,
+            summary: nextUi.summary,
+            request: userText,
+            ui: nextUi,
+            values: nextValues
+          },
+          ...current
+        ].slice(0, maxStoredTools)
+      );
       setLogs([]);
       setStatus('Ready');
       setMessages(current => [
@@ -249,7 +258,7 @@ export function App() {
       <section className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="min-h-0 flex-1 overflow-y-auto">
-            <div className={cn('mx-auto flex min-h-full w-full max-w-3xl flex-col px-6 pt-10', ui ? 'pb-24' : 'pb-28')}>
+            <div className={cn('mx-auto flex min-h-full w-full max-w-3xl flex-col px-6 pt-10', ui ? 'pb-64' : 'pb-28')}>
               {ui ? (
                 <div className="space-y-7">
                   <TaskTranscript messages={messages} />
@@ -605,6 +614,61 @@ function submitOnCommandEnter(event: KeyboardEvent<HTMLTextAreaElement>, onSubmi
   if (event.key !== 'Enter' || (!event.metaKey && !event.ctrlKey)) return;
   event.preventDefault();
   onSubmit();
+}
+
+function readStoredToolHistory(): ToolHistoryItem[] {
+  try {
+    if (typeof localStorage === 'undefined') return [];
+    const rawHistory = localStorage.getItem(toolHistoryStorageKey);
+    if (!rawHistory) return [];
+
+    const parsed: unknown = JSON.parse(rawHistory);
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed.filter(isToolHistoryItem).slice(0, maxStoredTools);
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredToolHistory(items: ToolHistoryItem[]) {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(toolHistoryStorageKey, JSON.stringify(items.slice(0, maxStoredTools)));
+  } catch {
+    // Ignore storage failures, for example private mode quota errors.
+  }
+}
+
+function isToolHistoryItem(value: unknown): value is ToolHistoryItem {
+  if (!isRecord(value)) return false;
+
+  return (
+    typeof value.id === 'string' &&
+    typeof value.title === 'string' &&
+    typeof value.summary === 'string' &&
+    typeof value.request === 'string' &&
+    isGeneratedUi(value.ui) &&
+    isRecord(value.values)
+  );
+}
+
+function isGeneratedUi(value: unknown): value is GeneratedUi {
+  if (!isRecord(value) || !isRecord(value.action)) return false;
+
+  return (
+    typeof value.title === 'string' &&
+    typeof value.summary === 'string' &&
+    typeof value.tool === 'string' &&
+    Array.isArray(value.fields) &&
+    typeof value.action.label === 'string' &&
+    typeof value.action.tool === 'string' &&
+    Array.isArray(value.safety)
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
 function ToolForm(props: {
