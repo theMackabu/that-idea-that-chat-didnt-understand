@@ -1,8 +1,8 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { GeneratedUi, ToolOutputEvent, ToolRunRequest } from "../shared/schema";
+import type { ComposeUiRequest, GeneratedUi, ToolOutputEvent, ToolRunRequest } from "../shared/schema";
 
 const api = {
-  composeUi: (prompt: string): Promise<GeneratedUi> => ipcRenderer.invoke("ai:compose-ui", prompt),
+  composeUi: (request: ComposeUiRequest): Promise<GeneratedUi> => ipcRenderer.invoke("ai:compose-ui", request),
   selectFolder: (): Promise<string | null> => ipcRenderer.invoke("dialog:select-folder"),
   runAction: (request: ToolRunRequest): Promise<{ runId: string; command: string }> =>
     ipcRenderer.invoke("tool:run", request),

@@ -6,7 +6,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { generatedUiSchema, type GeneratedUi, type ToolRunRequest } from '../shared/schema';
+import { generatedUiSchema, type ComposeUiRequest, type GeneratedUi, type ToolRunRequest } from '../shared/schema';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const activeRuns = new Map<string, ChildProcessWithoutNullStreams>();
@@ -54,8 +54,9 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-ipcMain.handle('ai:compose-ui', async (_event, userPrompt: string): Promise<GeneratedUi> => {
-  const fallback = createFallbackUi(userPrompt);
+ipcMain.handle('ai:compose-ui', async (_event, request: ComposeUiRequest | string): Promise<GeneratedUi> => {
+  const composeRequest = normalizeComposeRequest(request);
+  const fallback = createFallbackUi(composeRequest.prompt);
   const localEnv = readLocalEnv();
   const openaiApiKey = localEnv.OPENAI_API_KEY?.trim();
 
@@ -82,9 +83,11 @@ ipcMain.handle('ai:compose-ui', async (_event, userPrompt: string): Promise<Gene
         'When a request benefits from richer UI, include blocks before fields, such as metrics for counts, bar charts for comparisons, boxes for warnings/instructions, and image blocks for preview URLs or generated file outputs.',
         'The app shell-quotes placeholder values before execution, so do not wrap placeholders in quotes.',
         'Use shell.run for executable tasks, including video downloads, ssh, git, ffmpeg, python, npm, docker, rsync, find, grep, tar, zip, database CLIs, network diagnostics, and system tools.',
-        'When useful, generate multiple fields so the user can safely adjust hostnames, folders, flags, formats, services, ports, and filters before running.'
+        'When useful, generate multiple fields so the user can safely adjust hostnames, folders, flags, formats, services, ports, and filters before running.',
+        'The user may be iterating on a previous generated tool. Use the provided conversation context, current UI values, command preview, and recent run output to resolve references like "that", "it", "the downloaded file", "same folder", or "the previous command".',
+        'When the user asks to modify a previous artifact or result, preserve and prefill relevant paths, URLs, folders, formats, and options from context instead of asking for them again.'
       ].join(' '),
-      prompt: `User request: ${userPrompt}`
+      prompt: buildComposePrompt(composeRequest)
     });
 
     return generatedUiSchema.parse(result.object);
@@ -95,6 +98,41 @@ ipcMain.handle('ai:compose-ui', async (_event, userPrompt: string): Promise<Gene
     };
   }
 });
+
+function normalizeComposeRequest(request: ComposeUiRequest | string): ComposeUiRequest {
+  return typeof request === 'string' ? { prompt: request } : request;
+}
+
+function buildComposePrompt(request: ComposeUiRequest): string {
+  const context = {
+    recentMessages: (request.messages ?? []).slice(-10),
+    currentUi: request.currentUi
+      ? {
+          title: request.currentUi.title,
+          summary: request.currentUi.summary,
+          tool: request.currentUi.tool,
+          fields: request.currentUi.fields.map(field => ({
+            name: field.name,
+            label: field.label,
+            type: field.type,
+            description: field.description,
+            defaultValue: field.defaultValue
+          })),
+          command: request.currentUi.command,
+          previewCommand: request.currentUi.previewCommand
+        }
+      : null,
+    currentValues: request.values ?? {},
+    currentCommandPreview: request.commandPreview,
+    recentRunOutput: (request.recentLogs ?? []).slice(-20)
+  };
+
+  return [
+    `Latest user request: ${request.prompt}`,
+    'Context from the current Workbench thread follows. Use it to preserve continuity and resolve pronouns/deictic references.',
+    JSON.stringify(context, null, 2)
+  ].join('\n\n');
+}
 
 ipcMain.handle('dialog:select-folder', async () => {
   const result = await dialog.showOpenDialog({

@@ -51,6 +51,15 @@ export type ToolRunRequest = {
   command?: string;
 };
 
+export type ComposeUiRequest = {
+  prompt: string;
+  messages?: Array<{ role: "user" | "assistant"; content: string }>;
+  currentUi?: GeneratedUi | null;
+  values?: Record<string, string | number | boolean | undefined>;
+  commandPreview?: string;
+  recentLogs?: string[];
+};
+
 export type ToolOutputEvent =
   | { runId: string; type: "start"; command: string }
   | { runId: string; type: "chunk"; stream: "stdout" | "stderr"; text: string }

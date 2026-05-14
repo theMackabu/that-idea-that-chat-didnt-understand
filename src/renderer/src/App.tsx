@@ -306,6 +306,21 @@ export function App() {
     if (!prompt.trim() || composing) return;
 
     const userText = prompt.trim();
+    const composeRequest = {
+      prompt: userText,
+      messages: [...messages, { role: 'user' as const, content: userText }].slice(-10),
+      currentUi: ui,
+      values,
+      commandPreview,
+      recentLogs: logs
+        .slice(-20)
+        .map(entry => entry.text)
+        .join('')
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(Boolean)
+        .slice(-20)
+    };
     setComposing(true);
     setPrompt('');
     setUi(null);
@@ -317,7 +332,7 @@ export function App() {
     setMessages(current => [...current, { id: crypto.randomUUID(), role: 'user', content: userText }]);
 
     try {
-      const nextUi = await window.uiterm.composeUi(userText);
+      const nextUi = await window.uiterm.composeUi(composeRequest);
       const nextValues = inferDefaults(nextUi.fields);
       const nextToolId = crypto.randomUUID();
       const nextTaskTitle = taskTitleEdited && taskTitle.trim() ? taskTitle.trim() : nextUi.title;
