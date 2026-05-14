@@ -573,18 +573,20 @@ function ToolSidebar(props: {
   return (
     <aside className="app-no-drag absolute inset-y-0 right-0 z-20 flex w-80 select-none flex-col border-l border-[var(--border)] bg-[var(--chrome-bg)] shadow-[-8px_0_18px_rgba(0,0,0,0.12)]">
       {items.length > 0 ? (
-        <div className="stable-scrollbar min-h-0 flex-1 overflow-y-auto p-2">
+        <div className="stable-scrollbar flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2">
           {items.map(item => (
             <div
               key={item.id}
               className={cn(
-                'group grid grid-cols-[1fr_auto] items-start gap-2 rounded-md transition',
+                'group flex w-full min-w-0 items-start gap-2 rounded-md transition',
                 item.id === activeId ? 'bg-[var(--active)]' : 'hover:bg-[var(--hover)]'
               )}
             >
-              <button type="button" onClick={() => onSelect(item)} className="min-w-0 px-3 py-2.5 text-left">
-                <div className="truncate text-sm font-medium text-[var(--text-strong)]">{item.title}</div>
-                <div className="mt-1 line-clamp-2 text-sm leading-5 text-[var(--text-faint)]">{item.summary}</div>
+              <button type="button" onClick={() => onSelect(item)} className="min-w-0 flex-1 px-3 py-2.5 text-left">
+                <div className="min-w-0 truncate text-sm font-medium text-[var(--text-strong)]">{item.title}</div>
+                <div className="mt-1 min-w-0 overflow-hidden text-ellipsis break-words text-sm leading-5 text-[var(--text-faint)] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
+                  {item.summary}
+                </div>
               </button>
               <button
                 type="button"
@@ -592,7 +594,7 @@ function ToolSidebar(props: {
                   event.stopPropagation();
                   onDelete(item.id);
                 }}
-                className="mt-2 mr-2 flex size-7 items-center justify-center rounded-md text-[var(--text-faint)] opacity-0 transition hover:bg-[var(--hover)] hover:text-[var(--text-strong)] group-hover:opacity-100"
+                className="mt-2 mr-2 flex size-7 shrink-0 items-center justify-center rounded-md text-[var(--text-faint)] opacity-0 transition hover:bg-[var(--hover)] hover:text-[var(--text-strong)] group-hover:opacity-100"
                 title="Delete"
               >
                 <Trash2 size={14} />

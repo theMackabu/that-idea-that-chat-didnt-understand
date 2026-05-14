@@ -83,6 +83,7 @@ ipcMain.handle('ai:compose-ui', async (_event, request: ComposeUiRequest | strin
         'Create a compact UI for any local command-line task the user asks for.',
         'Use tool shell.run for executable tasks. Use noop only when there is genuinely nothing local to run.',
         'For shell.run, include a command template in command. Use {{fieldName}} placeholders for user inputs.',
+        'Generate multi-step shell commands with newlines. Do not flatten shell scripts into one long line.',
         'Keep fields practical and typed. Use text, textarea, select, checkbox, file, folder, number, slider, and color fields that map to command arguments.',
         'Use file fields for source files, config files, archives, media files, PDFs, logs, and explicit output files. Use folder fields only for directories.',
         'Prefer picker-backed file/folder fields over asking the user to type paths.',
@@ -96,6 +97,9 @@ ipcMain.handle('ai:compose-ui', async (_event, request: ComposeUiRequest | strin
         'For follow-up requests like "convert that downloaded file", use the concrete producedFiles path from context as the file field defaultValue and command input. Do not re-run the previous download or generation step.',
         'For follow-up requests like "play it", "open it", or "watch it", generate a one-click opener using open and the concrete producedFiles path from context.',
         'Never hardcode guessed filenames like video.mp4, output.mp4, result.txt, or %(title)s as later input paths. If a later step needs a file path, expose an explicit file field or use a concrete path from recent output.',
+        'For download-and-open workflows, run the downloader once. Use a temp archive/output path from the same run to learn the final file, then open that file. Do not invoke yt-dlp a second time just to print the path.',
+        'Never put ~/ inside quotes in commands. Use $HOME/Downloads or an absolute folder path field instead.',
+        'Avoid set -o pipefail for read-only discovery pipelines that use head, tail, grep -q, or early-exit consumers; SIGPIPE can be a harmless successful result.',
         'Use sparse UI copy: titles should be 2 to 5 words, summaries should be one short sentence, field descriptions should be omitted unless truly helpful, and any description should be under 8 words.',
         'Avoid explanatory box blocks for obvious workflows. Prefer concise controls over paragraphs.',
         'Do not add safety text telling the user to ensure a CLI is installed or works. Workbench checks missing executables before running.'
@@ -184,6 +188,10 @@ async function reviewGeneratedUi(
       'When context contains producedFiles and the latest request refers to that prior output, the UI must use a file field defaultValue set to the matching producedFiles path and the command must operate on that field.',
       'For follow-up transforms, do not include the old download/generation command again unless the user explicitly asked to redo it.',
       'For requests to play, open, or watch an existing produced file, use macOS open against that file. Do not redownload or transform it.',
+      'Commands must be valid when rendered as shell scripts. Multi-step scripts should contain newlines or semicolons before case/if/then/esac/fi boundaries.',
+      'For download-and-open workflows, do not call the downloader twice. Capture the final downloaded filepath during the same run, then open that path.',
+      'Do not quote tilde paths like "~/Downloads"; quoted tilde does not expand. Use $HOME/Downloads or an absolute folder path.',
+      'Avoid set -o pipefail for discovery pipelines that intentionally stop early with head, tail, grep -q, or similar consumers.',
       'Do not use an output template, glob, CLI-specific placeholder, or generated filename pattern as if it were a concrete file path in a later command.',
       'Reject guessed filenames such as video.mp4, output.mp4, result.txt, and %(title)s whenever the real produced filename can differ.',
       'If a command must use a later output file, add an explicit output file/path field and reference that field consistently.',
@@ -212,7 +220,7 @@ async function reviewGeneratedUi(
 
 function inspectGeneratedUiToolAvailability(ui: GeneratedUi) {
   const values = Object.fromEntries(ui.fields.map(field => [field.name, field.defaultValue ?? '']));
-  const command = renderCommandTemplate(ui.command || ui.previewCommand || '', values).trim();
+  const command = normalizeRenderedCommand(renderCommandTemplate(ui.command || ui.previewCommand || '', values).trim());
   const executableReferences = new Set<string>([...extractExecutableTokens(command), ...extractMissingExecutableReferences(JSON.stringify(ui))]);
 
   return [...executableReferences].map(executable => ({
@@ -279,8 +287,8 @@ ipcMain.handle('tool:cancel', async (_event, runId: string) => {
 
 async function runWithOneRepairAttempt(runId: string, sender: WebContents, request: ToolRunRequest, initialCommand: ReturnType<typeof buildCommand>) {
   const first = await runCommandProcess(runId, sender, initialCommand);
-  if ((first.code ?? 0) === 0 || first.cancelled) {
-    sender.send('tool:output', { runId, type: 'exit', code: first.code, signal: first.signal });
+  if ((first.code ?? 0) === 0 || first.cancelled || isHarmlessPipeExit(first)) {
+    sender.send('tool:output', { runId, type: 'exit', code: isHarmlessPipeExit(first) ? 0 : first.code, signal: first.signal });
     return;
   }
 
@@ -319,7 +327,8 @@ async function runWithOneRepairAttempt(runId: string, sender: WebContents, reque
   });
 
   const second = await runCommandProcess(runId, sender, revisedConfig);
-  if ((second.code ?? 0) !== 0 && !second.cancelled) {
+  const secondSucceeded = (second.code ?? 0) === 0 || isHarmlessPipeExit(second);
+  if (!secondSucceeded && !second.cancelled) {
     sender.send('tool:output', {
       runId,
       type: 'chunk',
@@ -327,7 +336,18 @@ async function runWithOneRepairAttempt(runId: string, sender: WebContents, reque
       text: '\nThe revised command also failed. Please review Run details before trying again.\n'
     });
   }
-  sender.send('tool:output', { runId, type: 'exit', code: second.code, signal: second.signal });
+  sender.send('tool:output', { runId, type: 'exit', code: secondSucceeded ? 0 : second.code, signal: second.signal });
+}
+
+function isHarmlessPipeExit(result: { code: number | null; signal: NodeJS.Signals | null; output: string }) {
+  return (result.code === 141 || result.signal === 'SIGPIPE') && hasMeaningfulOutput(result.output);
+}
+
+function hasMeaningfulOutput(output: string) {
+  return output
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .some(line => line.length > 0 && !line.startsWith('process exited'));
 }
 
 function runCommandProcess(
@@ -513,7 +533,7 @@ function buildCommand(request: ToolRunRequest): {
   command: string;
 } {
   if (request.tool === 'shell.run') {
-    const command = renderCommandTemplate(request.command || '', request.values).trim();
+    const command = normalizeRenderedCommand(renderCommandTemplate(request.command || '', request.values).trim());
     if (!command) throw new Error('No command was generated.');
     const argv = splitCommandLine(command);
     const executable = extractExecutableTokens(command)[0] ?? findExecutableToCheck(argv);
@@ -544,6 +564,10 @@ function buildCommand(request: ToolRunRequest): {
 function shellQuote(value: string): string {
   if (/^[A-Za-z0-9_./:=@%+-]+$/.test(value)) return value;
   return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function normalizeRenderedCommand(command: string): string {
+  return command.replaceAll('"~/', '"$HOME/').replaceAll("'~/", "'$HOME/");
 }
 
 function findExecutableToCheck(argv: string[]): string | null {
